@@ -55,13 +55,14 @@
 generated: 2026-07-13
 last_updated: 2026-07-13
 project: credit-scorecard-lab
+# story 1-1 created & set ready-for-dev on 2026-07-13; epic-1 -> in-progress
 project_key: NOKEY
 tracking_system: file-system
 story_location: docs/implementation-artifacts
 
 development_status:
-  epic-1: backlog
-  1-1-scaffolding-data-acquisition: backlog
+  epic-1: in-progress
+  1-1-scaffolding-data-acquisition: review
   1-2-sample-design-leakage-label-split: backlog
   1-3-preprocessing-missing-outliers: backlog
   1-4-woe-binning-variable-selection: backlog
