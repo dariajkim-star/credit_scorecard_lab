@@ -1,0 +1,84 @@
+# generated: 2026-07-13
+# last_updated: 2026-07-13
+# project: credit-scorecard-lab
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: docs/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story is created (via create-story)
+#   - in-progress -> done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, GPT cross-review per project convention)
+# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
+#
+# PROJECT-SPECIFIC NOTES (from readiness report 2026-07-13):
+# ===========================================================
+# - 1-7: LARGE story (FR6+7+8 + validation frame + manifest). If dev context runs
+#   short, split into 1-7a (evaluation+grading) / 1-7b (PSI+frame+manifest) and
+#   update this file accordingly.
+# - 3-3: BLOCKED-EXTERNAL - SAS OnDemand account pending user confirmation.
+#   Do NOT start until user confirms. If unavailable, scope shrinks to
+#   documentation-only per story AC. Does not block any other story.
+# - 2-5: Before dev, attach UX references researched 2026-07-13 (Streamlit credit
+#   dashboards, Evidently PSI report layout, Dribbble fintech tone) to dev context.
+# - Epic DoD (all epics): demo artifact + git commit + Obsidian mirror.
+
+generated: 2026-07-13
+last_updated: 2026-07-13
+project: credit-scorecard-lab
+project_key: NOKEY
+tracking_system: file-system
+story_location: docs/implementation-artifacts
+
+development_status:
+  epic-1: backlog
+  1-1-scaffolding-data-acquisition: backlog
+  1-2-sample-design-leakage-label-split: backlog
+  1-3-preprocessing-missing-outliers: backlog
+  1-4-woe-binning-variable-selection: backlog
+  1-5-champion-logistic-scorecard: backlog
+  1-6-challenger-lightgbm-calibration: backlog
+  1-7-evaluation-grading-psi-artifact-contract: backlog
+  epic-1-retrospective: optional
+  epic-2: backlog
+  2-1-cutoff-simulation-swapset: backlog
+  2-2-reason-codes: backlog
+  2-3-fastapi-scoring-serving: backlog
+  2-4-profit-based-cutoff: backlog
+  2-5-streamlit-dashboard: backlog
+  epic-2-retrospective: optional
+  epic-3: backlog
+  3-1-rule-efficiency-audit: backlog
+  3-2-text-features-emp-title: backlog
+  3-3-sas-replication: backlog
+  3-4-mdd-readme-github: backlog
+  epic-3-retrospective: optional

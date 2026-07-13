@@ -4,6 +4,7 @@ companions:
   - stack.md
   - pipeline-diagram.md
   - ../../../API_SPEC.md
+  - ../../planning-artifacts/architecture/architecture-credit-scorecard-lab-2026-07-10/ARCHITECTURE-SPINE.md
 sources:
   - ../../../DEV_PLAN.md
   - C:\Users\user\Desktop\ob_storage\신용평가_CRM_사이드프로젝트\01_신용스코어카드_랩.md
