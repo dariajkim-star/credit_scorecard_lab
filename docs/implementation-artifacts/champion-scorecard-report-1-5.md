@@ -74,6 +74,29 @@ score. A "safe" synthetic profile (high fico, low dti) scores strictly higher
 than a "risky" one (low fico, high dti) — see
 `tests/test_champion.py::test_score_applicant_safer_profile_scores_higher`.
 
+## Real-data results (2026-07-14)
+
+The full 1.1-1.5 pipeline was run against the real parquet (589,488 labeled
+rows; see sample-design-report-1-2.md for split details):
+
+- **IV table (top)**: fico_range_low/high 0.130 (twins, |corr|=1.000 — the
+  correlation pruning kept exactly one), annual_inc 0.099, dti 0.042,
+  home_ownership 0.035, revol_util 0.030, inq_last_6mths 0.028, purpose 0.024.
+  9 variables dropped for IV < 0.02 (incl. loan_amnt/delinq_2yrs at ~0).
+- **Selected (7)**: fico_range_low, annual_inc, dti, home_ownership,
+  revol_util, inq_last_6mths, purpose.
+- **Coefficient signs: all 7 negative — AC2's business-sense check PASSES on
+  real data.**
+- **Score distribution (train)**: min 496 / median 545 / max 601; mean score
+  good=547 vs bad=539.
+- **Sanity AUC** (predict_proba, informal — formal 3-way evaluation is Story
+  1.7's scope): train 0.647 / valid 0.641 / oot 0.643. Stable across splits
+  (no overfit). Modest by design: grade/sub_grade/int_rate — LC's own
+  underwriting outputs — were conservatively excluded in the Story 1.2
+  leakage audit, so the model works only from application-time bureau/income
+  fields.
+- Champion artifact + manifest written to `models/artifacts/` (gitignored).
+
 ## Data availability
 
 As with Stories 1.1-1.4, `data/lc_accepted_2012_2015_36m.parquet` does not

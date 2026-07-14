@@ -15,11 +15,20 @@ SPEC, chosen to avoid introducing an RNG dependency for a temporal split):
 is empty (treated as a sample-design failure, not a warning — see AC success
 criteria in the story file).
 
-Row counts and bad rates per split can only be reported once the real
-`data/lc_accepted_2012_2015_36m.parquet` exists (see "Data availability" in
-the story Dev Notes — it does not exist in this dev environment as of
-2026-07-14). `scorecard.sample_design.split_summary()` computes exactly this
-table; running it against the real parquet is a one-line follow-up:
+**Measured on real data (2026-07-14, after running `pipelines/01_download.py`):**
+
+Raw file 2,260,701 rows -> 589,635 after the 2012-2015/36m filter (33 rows
+with unparseable `issue_d` excluded, caught by the loader's warn log) ->
+589,488 after labeling (147 in-progress loans dropped).
+
+| Split | Rows | Bad rate |
+|---|---|---|
+| train (2012-2013) | 143,892 | 12.70% |
+| valid (2014) | 162,570 | 13.73% |
+| oot (2015) | 283,026 | 14.89% |
+
+The rising bad rate by vintage is consistent with Lending Club's known
+portfolio deterioration over this period. The snippet used:
 
 ```python
 import pandas as pd
@@ -66,7 +75,16 @@ adopted), with rationale, independent of whether a future story revisits it.
 
 See [leakage-audit-1-2.md](leakage-audit-1-2.md) (AC 1).
 
-## Known risk (unverified against real data)
+## Known risk (RESOLVED 2026-07-14 — verified against real data)
+
+**Verified: not an issue for this sample window.**
+`df["loan_status"].value_counts()` on the real 2012-2015/36m parquet shows
+**0 rows** with either "Does not meet the credit policy" variant (the values
+exist only as unused categorical levels inherited from the full file).
+`make_label`'s exact matching is safe as-is. Original risk description kept
+below for the record.
+
+### Original description (pre-verification)
 
 `make_label()` matches `loan_status` by exact string only (`"Charged Off"`,
 `"Default"`, `"Fully Paid"`). The real Lending Club accepted-loans dataset
