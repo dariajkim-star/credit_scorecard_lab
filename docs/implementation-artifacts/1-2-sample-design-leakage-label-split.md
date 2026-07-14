@@ -4,7 +4,7 @@ baseline_commit: 6c11c322b7bf9cc74f209324c5538ee5a4ccade1
 
 # Story 1.2: 표본 설계 — 누수 감사·라벨·분할
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
