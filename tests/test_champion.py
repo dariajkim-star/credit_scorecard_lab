@@ -143,18 +143,29 @@ def test_save_champion_artifact_roundtrip_and_manifest(fitted_champion, tmp_path
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="ascii"))
 
-    for key in ["model_type", "model_version", "trained_at", "feature_order", "pdo", "base_score", "woe_bin_edges"]:
+    for key in [
+        "model_type", "model_version", "trained_at", "feature_order",
+        "pdo", "base_score", "base_odds", "woe_bin_edges",
+    ]:
         assert key in manifest, f"missing manifest key: {key}"
     assert manifest["model_type"] == "champion"
     assert manifest["feature_order"] == VARS
     assert manifest["pdo"] == PDO
     assert manifest["base_score"] == BASE_SCORE
+    assert manifest["base_odds"] == BASE_ODDS
     assert set(manifest["woe_bin_edges"]) == set(VARS)
 
     import joblib
 
-    reloaded = joblib.load(model_path)
-    row = woe.iloc[0]
-    original_score = score_applicant(model, row, VARS)
-    reloaded_score = score_applicant(reloaded, row, VARS)
+    from scorecard.binning import transform_woe
+
+    bundle = joblib.load(model_path)
+    assert set(bundle) == {"model", "binners"}
+    assert set(bundle["binners"]) == set(VARS)  # fitted binners ship with the artifact (AD-1/AD-4)
+
+    # end-to-end: re-derive WOE from a raw row using ONLY the reloaded bundle
+    raw_row = df.iloc[[0]]
+    reloaded_woe = transform_woe(raw_row, bundle["binners"])
+    reloaded_score = score_applicant(bundle["model"], reloaded_woe.iloc[0], VARS)
+    original_score = score_applicant(model, woe.iloc[0], VARS)
     assert reloaded_score == pytest.approx(original_score)

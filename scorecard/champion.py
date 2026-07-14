@@ -97,7 +97,12 @@ def save_champion_artifact(
     variables: list[str],
     out_dir: Path,
 ) -> Path:
-    """Save the joblib model + manifest.json (AD-1).
+    """Save the joblib model bundle + manifest.json (AD-1).
+
+    The bundle includes the fitted binners (not just the logistic model) -
+    serving (Story 2.3) needs them to WOE-transform a raw applicant before
+    scoring; AD-4 forbids retraining at serve time, so they must ship in the
+    artifact rather than be refit.
 
     ``grade_thresholds`` is an AD-1 common key but is produced by CAP-7
     (Story 1.7, not yet built) - it is intentionally omitted here and left
@@ -109,7 +114,7 @@ def save_champion_artifact(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     model_path = out_dir / "champion_model.joblib"
-    joblib.dump(model, model_path)
+    joblib.dump({"model": model, "binners": {var: binners[var] for var in variables}}, model_path)
 
     all_edges = bin_edges(binners)
     woe_bin_edges = {var: all_edges[var] for var in variables}
@@ -121,6 +126,7 @@ def save_champion_artifact(
         "feature_order": variables,
         "pdo": PDO,
         "base_score": BASE_SCORE,
+        "base_odds": BASE_ODDS,
         "woe_bin_edges": woe_bin_edges,
     }
     manifest_path = out_dir / "champion_manifest.json"

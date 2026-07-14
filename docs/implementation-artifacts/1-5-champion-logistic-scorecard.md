@@ -124,6 +124,17 @@ claude-sonnet-5 (bmad-dev-story)
 - `docs/implementation-artifacts/champion-scorecard-report-1-5.md` (NEW)
 - `docs/implementation-artifacts/sprint-status.yaml` (MODIFIED — 상태 전이)
 
+## Senior Developer Review (AI)
+
+- 리뷰 일자: 2026-07-14, 도구: claude /code-review (medium)
+- 결과: Changes Requested → 2건 패치(1건 defer)
+- Findings (3건: CONFIRMED 2 / PLAUSIBLE 1):
+  - [x] [Med-High/correctness] `save_champion_artifact`가 fit된 binners를 저장하지 않아 서빙(2.3)이 원시 신청건→WOE 변환을 할 수 없는 상태였음(AD-1/AD-4 위반 소지, 실물 확인: 927B joblib에 모델만 존재) → 아티팩트를 `{"model":..., "binners":{선정변수만}}` 딕셔너리 번들로 변경. 로드 계약 변경에 맞춰 `test_save_champion_artifact_roundtrip_and_manifest`를 "원시 행 → 재로드 binners로 WOE 재계산 → 점수" end-to-end로 갱신. **실데이터 아티팩트도 새 포맷으로 재생성**하고 원시 신청건 재점수화(567.9, 기존과 일치) 확인.
+  - [x] [Med/correctness] manifest에 `base_odds`(50) 누락 — 점수공식 offset이 의존하는 상수인데 재현성(NFR1) 확보 안 됨 → manifest에 `base_odds` 키 추가.
+  - [ ] [Low/conventions, defer] `LogisticRegression()`의 기본 L2 정규화(C=1.0)가 미문서화. 사용자 지시로 이번엔 보류.
+- 최종 pytest: 55 passed.
+
 ## Change Log
 
 - 2026-07-14: Story 1.5 구현 완료 — 로지스틱 회귀(train WOE) + 계수부호 검증 + Siddiqi PDO 점수변환 + 아티팩트/manifest 저장(grade_thresholds는 1.7 소관으로 의도적 생략). pytest 55 passed(합성 데이터, 실parquet 미존재). Status → review.
+- 2026-07-14: 코드리뷰 2건 패치(binners 아티팩트 번들 포함, manifest base_odds 추가) + 실데이터 아티팩트 재생성·재검증. 55 passed.

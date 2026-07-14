@@ -51,12 +51,23 @@ Both correctly signed — see
 ## Manifest (AD-1)
 
 `save_champion_artifact()` writes `champion_model.joblib` +
-`champion_manifest.json` with:
+`champion_manifest.json`.
 
-- Common keys: `model_type="champion"`, `model_version="champion-1.0.0"`,
+**`champion_model.joblib` (code review fix)**: a dict `{"model": ..., "binners":
+{selected_var: OptimalBinning, ...}}`, not the bare LogisticRegression. Serving
+(Story 2.3) receives a raw applicant, not a pre-WOE'd one - it needs the fitted
+binners from this bundle to transform before scoring; AD-4 forbids refitting
+at serve time. Verified end-to-end on real data: reload the bundle, WOE-transform
+a raw training row using only `bundle["binners"]`, score with `bundle["model"]`
+- reproduces the original score exactly.
+
+Manifest keys:
+- Common: `model_type="champion"`, `model_version="champion-1.0.0"`,
   `trained_at` (ISO-8601 UTC), `feature_order` (must match the WOE DataFrame's
   column order used at scoring time)
-- Champion-only keys: `pdo`, `base_score`, `woe_bin_edges` (per-variable split
+- Champion-only: `pdo`, `base_score`, `base_odds` (code review fix - the score
+  formula's offset depends on it; omitting it broke reproducibility if the
+  constant were ever changed later), `woe_bin_edges` (per-variable split
   points, from Story 1.4's `bin_edges()`, restricted to the selected variables)
 
 **`grade_thresholds` is intentionally omitted.** AD-1 lists it as a common
