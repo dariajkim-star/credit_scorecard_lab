@@ -4,7 +4,7 @@ baseline_commit: 1c6ce0ff02fb0f02f12b503ea2687f54a899a5e8
 
 # Story 1.1: 프로젝트 스캐폴딩과 데이터 확보
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

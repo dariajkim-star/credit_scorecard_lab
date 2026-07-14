@@ -1,0 +1,67 @@
+# Sample Design Report — Story 1.2
+
+## Split definition (AC 3)
+
+Deterministic vintage-year split (story-owner decision — not specified in
+SPEC, chosen to avoid introducing an RNG dependency for a temporal split):
+
+| Split | Vintage(s) |
+|---|---|
+| train | 2012, 2013 |
+| valid | 2014 |
+| oot | 2015 |
+
+`scorecard.sample_design.split_by_vintage()` raises `ValueError` if any split
+is empty (treated as a sample-design failure, not a warning — see AC success
+criteria in the story file).
+
+Row counts and bad rates per split can only be reported once the real
+`data/lc_accepted_2012_2015_36m.parquet` exists (see "Data availability" in
+the story Dev Notes — it does not exist in this dev environment as of
+2026-07-14). `scorecard.sample_design.split_summary()` computes exactly this
+table; running it against the real parquet is a one-line follow-up:
+
+```python
+import pandas as pd
+from scorecard.sample_design import label_and_filter, split_by_vintage, split_summary
+
+df = pd.read_parquet("data/lc_accepted_2012_2015_36m.parquet")
+labeled = label_and_filter(df)
+groups = split_by_vintage(labeled)
+print(split_summary(groups))
+```
+
+## Performance window decision (AC 4 — SPEC open question)
+
+**Decision: adopt the maturity-based definition as the sole label definition
+for this story. Do not adopt the 12-month performance-window approximation.**
+
+Rationale:
+
+- `stack.md`'s risk table already flagged this as an open question and named
+  "만기 기준 최종 상태" (final status at maturity) as the primary definition,
+  with a 12-month window reserved for an appendix experiment. This story
+  confirms that choice rather than reopening it.
+- `make_label()` uses `loan_status` directly (Charged Off / Default / Fully
+  Paid), which is Lending Club's own terminal-status field — it requires no
+  performance-window approximation at all. The maturity-based label is
+  strictly simpler and has no risk of mid-window mislabeling (e.g. a loan
+  that is current at the 12-month mark but eventually defaults at month 20
+  would be wrongly labeled "good" under a 12-month window).
+- The tradeoff a 12-month window would buy is label *recency* (usable before
+  a loan reaches its 36-month term) at the cost of a materially higher
+  mislabel rate for medium-risk loans that default late. Given this project's
+  vintages (2012-2015, all closed out well before the 2018Q4 data cutoff per
+  NFR8), the full sample already has mature, terminal labels available — there
+  is no recency pressure that would justify the tradeoff here.
+- `scorecard.sample_design.performance_window_months()` is provided as the
+  tool for the appendix experiment if a future story wants to quantify how
+  many rows would flip label under a 12-month window; it is not invoked by
+  `make_label()` or `label_and_filter()`.
+
+This decision record satisfies AC 4: the SPEC open question is resolved (not
+adopted), with rationale, independent of whether a future story revisits it.
+
+## Leakage audit
+
+See [leakage-audit-1-2.md](leakage-audit-1-2.md) (AC 1).
