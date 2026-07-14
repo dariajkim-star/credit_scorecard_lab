@@ -4,7 +4,7 @@ baseline_commit: e6d595a
 
 # Story 1.4: WOE 비닝과 변수선정 (optbinning 스파이크 포함)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
