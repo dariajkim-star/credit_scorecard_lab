@@ -4,7 +4,7 @@ baseline_commit: e5ca061a3feea0feb1cca7e78c0f5f4d1d18b53f
 
 # Story 1.3: 결측·이상치 전처리
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
