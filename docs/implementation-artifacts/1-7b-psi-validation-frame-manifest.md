@@ -4,7 +4,7 @@ baseline_commit: bf80f08
 
 # Story 1.7b: PSI, Scored Validation Frame, Manifest 최종화 (FR8, AD-3, AD-1 완결)
 
-Status: review
+Status: done
 
 <!-- Split from epics.md Story 1.7 (see 1-7a-evaluation-grading.md for the
 same note). This is 1-7b: FR8(PSI) + AD-3(scored validation frame) +
