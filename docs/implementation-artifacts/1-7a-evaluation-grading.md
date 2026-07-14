@@ -4,7 +4,7 @@ baseline_commit: c1ed76a
 
 # Story 1.7a: 3면 평가와 등급 매핑 (FR6, FR7)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
