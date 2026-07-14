@@ -85,7 +85,6 @@ def label_and_filter(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["bad_flag"] = make_label(out)
     out = out.loc[out["bad_flag"].notna()].reset_index(drop=True)
-    out["bad_flag"] = out["bad_flag"].astype("Int64")
     return out
 
 
@@ -101,8 +100,10 @@ OOT_VINTAGES = {2015}
 def split_by_vintage(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Split a labeled frame into train/valid/oot by vintage (AC 3).
 
-    Raises ValueError if any split is empty - an empty split is a sample
-    design failure, not a warning.
+    Raises ValueError if any split is empty, or if any input row falls
+    outside the known vintage sets - both are sample design failures, not
+    silent drops (e.g. if config.VINTAGE_MIN/MAX is widened without updating
+    TRAIN/VALID/OOT_VINTAGES here).
     """
     groups = {
         "train": df.loc[df["vintage"].isin(TRAIN_VINTAGES)].reset_index(drop=True),
@@ -112,6 +113,15 @@ def split_by_vintage(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     for name, group in groups.items():
         if len(group) == 0:
             raise ValueError(f"split '{name}' is empty - sample design failure")
+
+    accounted = sum(len(group) for group in groups.values())
+    if accounted != len(df):
+        unmatched = sorted(df.loc[~df["vintage"].isin(TRAIN_VINTAGES | VALID_VINTAGES | OOT_VINTAGES), "vintage"].unique())
+        raise ValueError(
+            f"{len(df) - accounted} row(s) have vintage(s) {unmatched} outside "
+            "TRAIN/VALID/OOT_VINTAGES - update the split definition or the "
+            "upstream vintage filter"
+        )
     return groups
 
 

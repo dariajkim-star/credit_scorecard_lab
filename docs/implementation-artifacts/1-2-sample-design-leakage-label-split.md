@@ -133,6 +133,16 @@ claude-sonnet-5 (bmad-dev-story)
 - `docs/implementation-artifacts/sample-design-report-1-2.md` (NEW)
 - `docs/implementation-artifacts/sprint-status.yaml` (MODIFIED — 상태 전이)
 
+## Senior Developer Review (AI)
+
+- 리뷰 일자: 2026-07-14, 도구: claude /code-review (medium)
+- 결과: Changes Requested → 2건 패치 완료, 1건 문서화(defer)
+- Findings (3건: CONFIRMED 1 / PLAUSIBLE 2):
+  - [x] [Med/correctness] `split_by_vintage`가 TRAIN/VALID/OOT_VINTAGES 밖의 vintage 행을 에러 없이 조용히 드롭(실증 재현: 2011 빈티지 1행이 흔적 없이 사라짐). → 그룹 합계 != 입력 행수면 `ValueError` 발생하도록 방어 추가, 테스트 신설.
+  - [ ] [Low/correctness, PLAUSIBLE — 문서화만] `make_label`의 정확 매칭이 실제 Lending Club의 "Does not meet the credit policy. Status:X" 변형을 오분류할 가능성. 2012-2015 창엔 안 나타날 공산이 크고 실데이터 미보유로 검증 불가 — `sample-design-report-1-2.md`에 "Known risk"로 기록, 실데이터 확보 시 확인 절차 명시.
+  - [x] [Low/simplification] `label_and_filter`의 중복 `.astype("Int64")` 재캐스팅 제거.
+
 ## Change Log
 
 - 2026-07-14: Story 1.2 구현 완료 — 누수 감사(28컬럼 분류+문서화), bad/good 라벨링(NFR8), 빈티지 기반 train/valid/OOT 분할(결정론적), 12개월 성과창 미채택 결정 기록. pytest 20 passed(합성 데이터, 실parquet 미존재). Status → review.
+- 2026-07-14: 코드리뷰 2건 패치(unmatched-vintage 방어 + 중복 캐스팅 제거) + 1건 리스크 문서화, 21 passed.

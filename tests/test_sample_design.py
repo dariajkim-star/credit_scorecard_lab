@@ -102,6 +102,16 @@ def test_split_by_vintage_raises_on_empty_group():
         split_by_vintage(oot_only)
 
 
+def test_split_by_vintage_raises_on_unmatched_vintage():
+    df = label_and_filter(_labeled_frame())
+    stray = pd.DataFrame(
+        {"id": ["z"], "vintage": pd.array([2011], dtype="Int64"), "bad_flag": pd.array([0], dtype="Int64")}
+    )
+    df_with_stray = pd.concat([df, stray], ignore_index=True)
+    with pytest.raises(ValueError, match="outside"):
+        split_by_vintage(df_with_stray)
+
+
 def test_split_summary_reports_rows_and_bad_rate():
     df = label_and_filter(_labeled_frame())
     groups = split_by_vintage(df)

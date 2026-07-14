@@ -65,3 +65,25 @@ adopted), with rationale, independent of whether a future story revisits it.
 ## Leakage audit
 
 See [leakage-audit-1-2.md](leakage-audit-1-2.md) (AC 1).
+
+## Known risk (unverified against real data)
+
+`make_label()` matches `loan_status` by exact string only (`"Charged Off"`,
+`"Default"`, `"Fully Paid"`). The real Lending Club accepted-loans dataset
+also contains legacy status variants for early loans, e.g. `"Does not meet
+the credit policy. Status:Charged Off"` / `"...Status:Fully Paid"`. Those
+rows would currently be misclassified as in-progress (excluded from the
+sample) rather than correctly labeled bad/good.
+
+This is flagged, not fixed, because:
+- these legacy statuses are associated with pre-2012 originations in the
+  public dataset, so they are unlikely (but not verified) to appear in this
+  project's 2012-2015 vintage window
+- there is no real parquet in this dev environment to check against (see
+  "Data availability" above)
+
+When the real parquet exists, run
+`df["loan_status"].value_counts()` on the raw (pre-label) frame and confirm
+no `"Does not meet the credit policy..."` values are present. If they are,
+extend `BAD_STATUSES`/`GOOD_STATUSES` matching (e.g. `str.contains` on the
+suffix) before trusting the split's bad rates.
