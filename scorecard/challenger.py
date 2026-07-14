@@ -17,7 +17,6 @@ import lightgbm as lgb
 import numpy as np
 import optuna
 import pandas as pd
-from sklearn.calibration import calibration_curve
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss
@@ -131,25 +130,36 @@ def brier_scores(
 def calibration_curve_data(
     model: lgb.LGBMClassifier, calibrator, df: pd.DataFrame, variables: list[str], y: pd.Series, n_bins: int = 10
 ) -> pd.DataFrame:
-    """Before/after reliability-curve points (mean predicted vs observed)."""
+    """Before/after reliability-curve points (mean predicted vs observed).
+
+    Both curves are binned on the SAME edges (derived from the raw
+    probability's quantiles), not independently re-quantiled per curve.
+    ``sklearn.calibration.calibration_curve`` bins before/after separately,
+    which can yield different bin counts when one distribution has few
+    unique values (e.g. a coarse tree model) - a code-review finding:
+    merging those by positional index silently compares unrelated
+    probability ranges. Shared edges keep "bin i" meaning the same
+    probability range in both columns.
+    """
     y_arr = y.to_numpy(dtype=int)
     raw_p = model.predict_proba(_to_matrix(df, variables))[:, 1]
     calibrated_p = calibrated_predict_proba(model, calibrator, df, variables)
 
-    obs_before, pred_before = calibration_curve(y_arr, raw_p, n_bins=n_bins, strategy="quantile")
-    obs_after, pred_after = calibration_curve(y_arr, calibrated_p, n_bins=n_bins, strategy="quantile")
+    edges = np.unique(np.quantile(raw_p, np.linspace(0, 1, n_bins + 1)))
+    if len(edges) < 2:
+        edges = np.array([0.0, 1.0])
 
-    return pd.DataFrame(
-        {
-            "mean_predicted_before": pred_before,
-            "observed_before": obs_before,
-        }
-    ).merge(
-        pd.DataFrame({"mean_predicted_after": pred_after, "observed_after": obs_after}),
-        left_index=True,
-        right_index=True,
-        how="outer",
-    )
+    def _binned(probs: np.ndarray, label: str) -> pd.DataFrame:
+        bins = pd.cut(probs, edges, include_lowest=True)
+        return (
+            pd.DataFrame({"bin": bins, "y": y_arr, "p": probs})
+            .groupby("bin", observed=True)
+            .agg(**{f"mean_predicted_{label}": ("p", "mean"), f"observed_{label}": ("y", "mean")})
+        )
+
+    before = _binned(raw_p, "before")
+    after = _binned(calibrated_p, "after")
+    return before.join(after, how="outer").reset_index()
 
 
 def save_shap_background_sample(
@@ -191,7 +201,12 @@ def save_challenger_artifact(
     joblib.dump({"model": model, "calibrator": calibrator}, model_path)
 
     shap_background_path = Path(shap_background_path)
-    shap_ref = str(shap_background_path.relative_to(out_dir)) if shap_background_path.is_relative_to(out_dir) else str(shap_background_path)
+    out_dir_resolved = out_dir.resolve()
+    shap_resolved = shap_background_path.resolve()
+    try:
+        shap_ref = str(shap_resolved.relative_to(out_dir_resolved))
+    except ValueError:
+        shap_ref = str(shap_background_path)
 
     manifest = {
         "model_type": MODEL_TYPE,

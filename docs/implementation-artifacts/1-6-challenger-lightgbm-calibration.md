@@ -126,6 +126,16 @@ claude-fable-5 (bmad-dev-story)
 - `docs/implementation-artifacts/challenger-report-1-6.md` (NEW)
 - `docs/implementation-artifacts/sprint-status.yaml` (MODIFIED — 상태 전이)
 
+## Senior Developer Review (AI)
+
+- 리뷰 일자: 2026-07-14, 도구: claude /code-review (medium)
+- 결과: Changes Requested → 2건 패치 완료
+- Findings (2건: CONFIRMED 1 / PLAUSIBLE 1):
+  - [x] [Med/correctness] `calibration_curve_data`가 before/after 곡선을 각각 독립적으로 quantile 비닝(`sklearn.calibration.calibration_curve`)한 뒤 **위치(인덱스) 기준으로 병합** — 라운드된 확률(예: 트리 모델)처럼 고유값이 적으면 두 곡선의 빈 개수가 달라질 수 있음(실증: 5개 vs 10개), 이 경우 "before의 3번째 행"과 "after의 3번째 행"이 전혀 다른 확률 구간을 가리키는데도 같은 행에 놓임 → raw 확률의 분위수로 **공유 bin 경계**를 만들어 before/after 둘 다 동일 경계로 비닝하도록 재작성(`pd.cut` + groupby, `calibration_curve` 미사용으로 전환). 회귀 테스트 추가(고유값 적은 raw 확률 vs 매끈한 calibrated 확률로 재현). 실데이터 재실행으로 각 행에 `bin` 컬럼이 명시되고 전후가 동일 구간으로 비교됨을 확인.
+  - [x] [Low/correctness] `save_challenger_artifact`의 `shap_ref` 계산이 절대/상대 경로가 섞이면(`is_relative_to`가 False 반환) manifest에 절대경로를 그대로 저장할 수 있었음(실증 확인) → 두 경로 모두 `.resolve()`로 정규화 후 `relative_to` 계산하도록 수정, 실패 시에만 폴백. 회귀 테스트 추가(절대경로로 shap path를 넘겨도 manifest엔 상대경로만 남는지 확인).
+- 최종 pytest: 67 passed. 실데이터 아티팩트 재생성 및 calibration curve 재확인 완료.
+
 ## Change Log
 
 - 2026-07-14: Story 1.6 구현 완료 — Optuna 튜닝 LightGBM(원변수, WOE 미사용) + isotonic calibration + SHAP 배경표본 고정 + 아티팩트/manifest 저장. pytest 65 passed. 실데이터로 전체 파이프라인 실행: Brier 개선 확인(0.11491→0.11480), sanity AUC 챔피언 대비 근소 우위(0.660/0.644/0.645 vs 0.647/0.641/0.643). Status → review.
+- 2026-07-14: 코드리뷰 2건 패치(calibration curve 공유 bin 경계로 정렬, shap_ref 경로 정규화) + 실데이터 재검증. 67 passed.

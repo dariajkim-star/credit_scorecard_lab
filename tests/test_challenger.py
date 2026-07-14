@@ -113,6 +113,39 @@ def test_calibration_curve_data_structure(split_data, tuned_model, calibrated):
     assert len(curve) > 0
 
 
+def test_calibration_curve_data_uses_shared_bin_edges_when_distributions_differ():
+    # Regression guard for the code-review finding: independently re-quantiling
+    # before/after probabilities can yield different bin counts (e.g. lumpy
+    # tree probabilities vs a smooth calibrated distribution), and merging by
+    # positional index then silently compares unrelated probability ranges.
+    import numpy as np
+    from unittest.mock import MagicMock
+
+    from scorecard.challenger import calibration_curve_data
+
+    rng = np.random.default_rng(0)
+    n = 2000
+    y = pd.Series(rng.integers(0, 2, n))
+    raw_p = rng.choice([0.02, 0.05, 0.1, 0.3, 0.9], size=n)  # few unique values -> few quantile bins
+    calibrated_p = rng.uniform(0, 1, n)  # smooth -> many quantile bins if binned independently
+
+    from sklearn.isotonic import IsotonicRegression
+
+    model = MagicMock()
+    model.predict_proba.return_value = np.column_stack([1 - raw_p, raw_p])
+
+    class _FakeCalibrator(IsotonicRegression):
+        def predict(self, p):
+            return calibrated_p
+
+    df = pd.DataFrame({"x": range(n)})
+    curve = calibration_curve_data(model, _FakeCalibrator(), df, ["x"], y, n_bins=10)
+    # every row must have both a before AND an after value tied to the SAME
+    # shared bin edge - i.e. no row should be all-before or all-after only
+    both_present = curve[["mean_predicted_before", "mean_predicted_after"]].notna().all(axis=1)
+    assert both_present.any()
+
+
 # --- SHAP background sample ----------------------------------------------------
 
 
@@ -163,3 +196,19 @@ def test_save_challenger_artifact_manifest_and_roundtrip(split_data, tuned_model
     original_p = calibrated_predict_proba(tuned_model, calibrated, train_df, VARS)
     reloaded_p = calibrated_predict_proba(bundle["model"], bundle["calibrator"], train_df, VARS)
     np.testing.assert_array_equal(original_p, reloaded_p)
+
+
+def test_save_challenger_artifact_shap_ref_relative_even_if_path_is_absolute(
+    split_data, tuned_model, calibrated, tmp_path
+):
+    # Regression guard for the code-review finding: passing an already-resolved
+    # (absolute) shap path against a relative out_dir used to make
+    # is_relative_to() return False, leaking a full machine-specific path
+    # into the manifest instead of a portable relative reference.
+    train_df, _, _, _ = split_data
+    bg_path = save_shap_background_sample(train_df, VARS, tmp_path / "shap_background.parquet", n=50, seed=7)
+    absolute_bg_path = bg_path.resolve()
+
+    save_challenger_artifact(tuned_model, calibrated, VARS, absolute_bg_path, tmp_path)
+    manifest = json.loads((tmp_path / "challenger_manifest.json").read_text(encoding="ascii"))
+    assert manifest["shap_background_sample_ref"] == "shap_background.parquet"

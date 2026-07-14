@@ -41,12 +41,24 @@ modest number of trees on a class-imbalanced binary target tends to start
 closer to calibrated than, say, an unconstrained boosted tree with many
 rounds.
 
-Calibration curve (10 quantile bins, valid split): the "after" column tracks
-`observed` almost exactly at every bin (isotonic regression is fit directly
-against this relationship, so this is expected - it's an in-sample
-calibration check, not an out-of-sample one; a fully rigorous check would
-calibrate on one held-out set and evaluate reliability on a third, but this
-project's OOT split is reserved untouched for Story 1.7's evaluation).
+Calibration curve (10 quantile bins on the raw probability, valid split,
+shared bin edges between before/after per the code-review fix below): the
+"after" column tracks `observed` almost exactly at every bin (isotonic
+regression is fit directly against this relationship, so this is expected -
+it's an in-sample calibration check, not an out-of-sample one; a fully
+rigorous check would calibrate on one held-out set and evaluate reliability
+on a third, but this project's OOT split is reserved untouched for Story
+1.7's evaluation).
+
+**Code review fix**: `calibration_curve_data()` originally binned the raw and
+calibrated probabilities independently (`sklearn.calibration.calibration_curve`
+per curve) and merged the two result sets by positional index. When one
+distribution has few unique values (verified with a synthetic lumpy-probability
+case: 5 bins vs 10), that merge silently compared unrelated probability
+ranges row-by-row. Fixed by deriving one set of bin edges from the raw
+probability's quantiles and binning both curves against those same edges
+(`pd.cut` + groupby); the returned frame now has an explicit `bin` column so
+each row's probability range is unambiguous.
 
 ## Real-data sanity AUC (informal, like Story 1.5's champion check)
 
