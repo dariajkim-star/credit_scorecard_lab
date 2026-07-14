@@ -12,6 +12,9 @@ monotonicity, not a fixed count).
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -88,3 +91,16 @@ def validate_monotonic(grade_bad_rate_table: pd.DataFrame) -> bool:
     """True iff bad_rate is non-decreasing from grade 1 upward (FR7)."""
     rates = grade_bad_rate_table.sort_values("grade")["bad_rate"].to_numpy()
     return bool(np.all(np.diff(rates) >= 0))
+
+
+def finalize_manifest(manifest_path: Path, grade_thresholds: np.ndarray) -> None:
+    """Patch an existing manifest.json to add/update grade_thresholds (AD-1 completion).
+
+    Only the manifest is rewritten - the model artifact saved by Story
+    1.5/1.6 is never re-dumped, so this cannot desync the joblib bundle
+    from its manifest.
+    """
+    manifest_path = Path(manifest_path)
+    manifest = json.loads(manifest_path.read_text(encoding="ascii"))
+    manifest["grade_thresholds"] = [float(e) for e in grade_thresholds]
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="ascii")

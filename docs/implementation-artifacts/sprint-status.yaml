@@ -70,7 +70,7 @@ development_status:
   1-6-challenger-lightgbm-calibration: done
 
   1-7a-evaluation-grading: done
-  1-7b-psi-validation-frame-manifest: backlog
+  1-7b-psi-validation-frame-manifest: review
   epic-1-retrospective: optional
   epic-2: backlog
   2-1-cutoff-simulation-swapset: backlog

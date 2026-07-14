@@ -8,6 +8,7 @@ import pytest
 from scorecard.grading import (
     assign_grade,
     enforce_monotonic_grades,
+    finalize_manifest,
     fit_grade_thresholds,
     validate_monotonic,
 )
@@ -96,3 +97,33 @@ def test_validate_monotonic_detects_violation():
 
     good_table = pd.DataFrame({"grade": [1, 2, 3], "bad_rate": [0.05, 0.10, 0.20]})
     assert validate_monotonic(good_table)
+
+
+# --- finalize_manifest (AD-1 completion) --------------------------------------
+
+
+def test_finalize_manifest_adds_grade_thresholds_preserving_existing_keys(tmp_path):
+    import json
+
+    manifest_path = tmp_path / "champion_manifest.json"
+    manifest_path.write_text(
+        json.dumps({"model_type": "champion", "model_version": "champion-1.0.0", "pdo": 20.0}),
+        encoding="ascii",
+    )
+    edges = np.array([496.4, 526.1, 600.9])
+    finalize_manifest(manifest_path, edges)
+
+    result = json.loads(manifest_path.read_text(encoding="ascii"))
+    assert result["model_type"] == "champion"  # existing keys preserved
+    assert result["pdo"] == 20.0
+    assert result["grade_thresholds"] == pytest.approx([496.4, 526.1, 600.9])
+
+
+def test_finalize_manifest_overwrites_existing_grade_thresholds(tmp_path):
+    import json
+
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps({"grade_thresholds": [1.0, 2.0]}), encoding="ascii")
+    finalize_manifest(manifest_path, np.array([9.0, 10.0, 11.0]))
+    result = json.loads(manifest_path.read_text(encoding="ascii"))
+    assert result["grade_thresholds"] == pytest.approx([9.0, 10.0, 11.0])
