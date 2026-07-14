@@ -113,6 +113,16 @@ claude-fable-5 (bmad-dev-story)
 - `docs/implementation-artifacts/binning-selection-report-1-4.md` (NEW)
 - `docs/implementation-artifacts/sprint-status.yaml` (MODIFIED — 상태 전이)
 
+## Senior Developer Review (AI)
+
+- 리뷰 일자: 2026-07-14, 도구: claude /code-review (medium) — 구현 세션(fable-5)과 다른 세션(sonnet-5)에서 진행, 코드를 신뢰하지 않고 실증 검증
+- 결과: Changes Requested → 2건 전부 패치 완료
+- Findings (2건: PLAUSIBLE 1 / CONFIRMED 1):
+  - [x] [Med/correctness] `select_variables`의 post-selection assertion(AC2의 "최종 |corr|≤0.7" 정량 보장)이 `.max().max()`의 skipna 기본값 때문에 NaN 상관계수(상수/퇴화 WOE 컬럼 발생 시)를 조용히 건너뜀 — 실증 재현. `skipna=False`로 1차 수정했으나 대각선 마스킹 자체가 NaN이라 정상 케이스까지 깨짐(테스트 2건 실패) → `np.triu_indices`로 상삼각만 추출해 대각선과 실제 NaN을 구분하는 방식으로 재수정, 회귀 테스트(`test_select_variables_raises_on_nan_correlation`) 추가.
+  - [x] [Low/efficiency] `select_variables`가 루프 반복마다 `iv_tbl.set_index("variable")` 재구축 — 루프 앞에서 `iv_map = dict(zip(...))` 한 번만 생성하도록 변경.
+- 검증한 것(문제 없음 확인): IV 필터→그리디 상관 제거 로직 자체(합성 데이터로 fico 쌍둥이·약변수 정확히 처리 확인), `metric_missing="empirical"` 처리.
+
 ## Change Log
 
 - 2026-07-14: Story 1.4 구현 완료 — optbinning 스파이크(PASS, metric_missing 함정 발견), WOE 비닝 엔진(AD-2 단일 소스), IV+상관 변수선정, bin_edges 접근자. pytest 43 passed(합성 데이터, 실parquet 미존재). Status → review.
+- 2026-07-14: 코드리뷰 2건 패치(NaN 상관 검사 강화 + iv_map 캐싱), 44 passed.

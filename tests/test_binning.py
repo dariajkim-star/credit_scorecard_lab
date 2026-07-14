@@ -168,3 +168,13 @@ def test_select_variables_final_set_under_corr_cap(fitted):
         corr = woe[selected].corr().abs()
         off = corr.where(~np.eye(len(selected), dtype=bool))
         assert float(off.max().max()) <= 0.7
+
+
+def test_select_variables_raises_on_nan_correlation():
+    # Regression guard for the code-review finding: a constant/degenerate WOE
+    # column produces NaN pairwise correlations, which skipna-default max()
+    # silently ignores - the guard must not let that slip through unnoticed.
+    woe = pd.DataFrame({"a": [1.0, 2, 3, 4, 5], "b": [7.0] * 5})
+    iv_tbl = pd.DataFrame({"variable": ["a", "b"], "iv": [0.5, 0.3]})
+    with pytest.raises(AssertionError, match="NaN"):
+        select_variables(woe, iv_tbl)

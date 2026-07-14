@@ -107,6 +107,8 @@ def select_variables(
     ``corr_max`` (the lower-IV member of each offending pair is the one
     dropped). Returns (selected variables, decision table with reasons).
     """
+    iv_map = dict(zip(iv_tbl["variable"], iv_tbl["iv"]))
+
     decisions: list[dict[str, object]] = []
     passed_iv: list[str] = []
     for _, row in iv_tbl.iterrows():
@@ -122,14 +124,20 @@ def select_variables(
         clash = next((kept for kept in selected if corr.loc[var, kept] > corr_max), None)
         if clash is None:
             selected.append(var)
-            decisions.append({"variable": var, "iv": float(iv_tbl.set_index("variable").loc[var, "iv"]), "selected": True, "reason": "passed IV and correlation filters"})
+            decisions.append({"variable": var, "iv": float(iv_map[var]), "selected": True, "reason": "passed IV and correlation filters"})
         else:
-            decisions.append({"variable": var, "iv": float(iv_tbl.set_index("variable").loc[var, "iv"]), "selected": False, "reason": f"|corr|={corr.loc[var, clash]:.3f} with higher-IV '{clash}' > {corr_max}"})
+            decisions.append({"variable": var, "iv": float(iv_map[var]), "selected": False, "reason": f"|corr|={corr.loc[var, clash]:.3f} with higher-IV '{clash}' > {corr_max}"})
 
     if len(selected) > 1:
-        final_corr = woe_df[selected].corr().abs()
-        off_diagonal = final_corr.where(~np.eye(len(selected), dtype=bool))
-        max_offdiag = float(off_diagonal.max().max())
+        final_corr = woe_df[selected].corr().abs().to_numpy()
+        off_diagonal_values = final_corr[np.triu_indices(len(selected), k=1)]
+        if np.isnan(off_diagonal_values).any():
+            raise AssertionError(
+                "post-selection correlation matrix contains NaN off-diagonal "
+                "entries (e.g. a constant or degenerate WOE column) - cannot "
+                f"verify the |corr| <= {corr_max} guarantee"
+            )
+        max_offdiag = float(off_diagonal_values.max())
         if max_offdiag > corr_max:
             raise AssertionError(f"post-selection max |corr| {max_offdiag:.3f} > {corr_max}")
 
