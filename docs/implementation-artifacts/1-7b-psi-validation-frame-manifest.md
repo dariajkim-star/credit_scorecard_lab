@@ -130,6 +130,15 @@ claude-sonnet-5 (bmad-dev-story)
 - `C:\Users\user\Desktop\ob_storage\신용평가_CRM_사이드프로젝트\12_P1_에픽1_완료_요약.md` (NEW, 프로젝트 외부 — 옵시디언 미러)
 - (gitignored, 커밋 대상 아님) `data/scored_validation_frame.parquet`, `models/artifacts/champion_manifest.json`·`challenger_manifest.json`(grade_thresholds 추가 갱신)
 
+## Senior Developer Review (AI)
+
+- 리뷰 일자: 2026-07-14, 도구: claude /code-review (medium)
+- 결과: 1건 발견(CONFIRMED, simplification) → 패치 완료. 정확성 버그는 발견되지 않음(실데이터 실행 중 이미 잡은 2건은 구현 단계에서 선반영됨).
+- Findings:
+  - [x] [Low/simplification] `build_scored_frame`의 챔피언/챌린저 블록이 `model_type`·bundle·variables·grade_edges만 다르고 거의 동일하게 반복 → `_model_rows(df, model_type, p_bad, grade_edges, int_rate)` 내부 헬퍼로 통합, 중복 제거. 향후 AD-3 스키마 변경 시 한쪽만 고치고 다른 쪽을 빠뜨리는 리스크 해소.
+- 최종 pytest: 92 passed(회귀 없음).
+
 ## Change Log
 
 - 2026-07-14: Story 1.7b 구현 완료 — generalized_score(챔피언·챌린저 통일 스케일), PSI(변수·점수, 저카디널리티+NaN 마스킹 버그 2건 실데이터 실행 중 발견·즉시 수정), scored validation frame(AD-3, 891,192행), manifest 완결(grade_thresholds, AD-1). pytest 92 passed. Epic 1 DoD 완료(성능표+커밋+옵시디언 미러). Status → review.
+- 2026-07-14: 코드리뷰 1건 패치(build_scored_frame 챔피언/챌린저 블록 중복 제거, _model_rows 헬퍼 도입). 92 passed.

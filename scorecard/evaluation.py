@@ -216,40 +216,29 @@ def build_scored_frame(
     (Story 1.3 only parsed revol_util; int_rate was never a feature so it
     was left untouched until this frame needs it for Story 2.4's profit calc).
     """
+    def _model_rows(df: pd.DataFrame, model_type: str, p_bad: np.ndarray, grade_edges: np.ndarray, int_rate: np.ndarray) -> pd.DataFrame:
+        score = generalized_score(p_bad)
+        return pd.DataFrame({
+            "applicant_id": df["id"].to_numpy(),
+            "vintage": df["vintage"].to_numpy(),
+            "model_type": model_type,
+            "score": score,
+            "pd": p_bad,
+            "grade": assign_grade(score, grade_edges),
+            "bad_flag": df["bad_flag"].to_numpy(dtype=int),
+            "int_rate": int_rate,
+            "recoveries": df["recoveries"].astype(float).to_numpy(),
+            "total_pymnt": df["total_pymnt"].astype(float).to_numpy(),
+        })
+
     frames = []
     for _, df in splits.items():
         int_rate = parse_percent(df["int_rate"]).astype(float).to_numpy()
 
         champ_p = champion_p_bad(champion_bundle, df, champion_variables)
-        champ_score = generalized_score(champ_p)
-        champ_grade = assign_grade(champ_score, champion_grade_edges)
-        frames.append(pd.DataFrame({
-            "applicant_id": df["id"].to_numpy(),
-            "vintage": df["vintage"].to_numpy(),
-            "model_type": "champion",
-            "score": champ_score,
-            "pd": champ_p,
-            "grade": champ_grade,
-            "bad_flag": df["bad_flag"].to_numpy(dtype=int),
-            "int_rate": int_rate,
-            "recoveries": df["recoveries"].astype(float).to_numpy(),
-            "total_pymnt": df["total_pymnt"].astype(float).to_numpy(),
-        }))
+        frames.append(_model_rows(df, "champion", champ_p, champion_grade_edges, int_rate))
 
         chall_p = challenger_p_bad(challenger_bundle, df, challenger_variables)
-        chall_score = generalized_score(chall_p)
-        chall_grade = assign_grade(chall_score, challenger_grade_edges)
-        frames.append(pd.DataFrame({
-            "applicant_id": df["id"].to_numpy(),
-            "vintage": df["vintage"].to_numpy(),
-            "model_type": "challenger",
-            "score": chall_score,
-            "pd": chall_p,
-            "grade": chall_grade,
-            "bad_flag": df["bad_flag"].to_numpy(dtype=int),
-            "int_rate": int_rate,
-            "recoveries": df["recoveries"].astype(float).to_numpy(),
-            "total_pymnt": df["total_pymnt"].astype(float).to_numpy(),
-        }))
+        frames.append(_model_rows(df, "challenger", chall_p, challenger_grade_edges, int_rate))
 
     return pd.concat(frames, ignore_index=True)[SCORED_FRAME_COLUMNS]
