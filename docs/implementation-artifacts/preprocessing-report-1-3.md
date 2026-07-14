@@ -18,6 +18,14 @@
   `apply_caps()`. This mirrors the fit-on-train/transform-only pattern Story
   1.4's WOE binning will use, and avoids leaking valid/oot distribution
   information into the cap boundaries.
+- **Capping is skipped for zero-inflated discrete counts** (`delinq_2yrs,
+  inq_last_6mths, pub_rec` — `CAPPING_EXCLUDED_COLUMNS`). Found via code
+  review: these columns are typically 98%+ zero in the real dataset, so a
+  blanket 1st/99th percentile cap collapses genuinely different risk levels
+  (e.g. 2 vs 5 public records both clip to 1) into the same value, destroying
+  signal Story 1.4's WOE binning could otherwise use. They are left as raw
+  counts; use `CAPPABLE_NUMERIC_COLUMNS` (9 columns), not `NUMERIC_COLUMNS`
+  (12), when calling `fit_caps`/`apply_caps`.
 - **Capping never changes the missing count.** `Series.clip()` passes NaN
   through untouched; `test_apply_caps_never_fills_missing` asserts this
   directly.
@@ -25,9 +33,12 @@
   emp_length, home_ownership, verification_status, purpose, addr_state`.
   Encoding/binning for these is Story 1.4's job.
 
-Numeric columns capped (12, from `scorecard.sample_design.feature_candidate_columns()`):
+Numeric columns identified (12, from `scorecard.sample_design.feature_candidate_columns()`):
 `loan_amnt, annual_inc, dti, delinq_2yrs, fico_range_low, fico_range_high,
 inq_last_6mths, open_acc, pub_rec, revol_bal, revol_util, total_acc`.
+
+Of those, 9 are actually capped (`CAPPABLE_NUMERIC_COLUMNS`): all except
+`delinq_2yrs, inq_last_6mths, pub_rec` (see "zero-inflated" bullet above).
 
 ## Data availability
 
@@ -40,8 +51,8 @@ parquet exists, run the full pipeline and inspect the report:
 import pandas as pd
 from scorecard.sample_design import label_and_filter, split_by_vintage
 from scorecard.preprocessing import (
-    NUMERIC_COLUMNS, coerce_percent_columns, fit_caps, apply_caps,
-    missing_summary, distribution_report,
+    NUMERIC_COLUMNS, CAPPABLE_NUMERIC_COLUMNS, coerce_percent_columns,
+    fit_caps, apply_caps, missing_summary, distribution_report,
 )
 
 df = pd.read_parquet("data/lc_accepted_2012_2015_36m.parquet")
@@ -52,11 +63,12 @@ groups = split_by_vintage(labeled)
 for name in groups:
     groups[name] = coerce_percent_columns(groups[name], ["revol_util"])
 
-print(missing_summary(groups["train"], NUMERIC_COLUMNS))
+print(missing_summary(groups["train"], NUMERIC_COLUMNS))  # all 12, reporting only
 
-caps = fit_caps(groups["train"], NUMERIC_COLUMNS)
+# capping uses the 9-column subset - zero-inflated counts are excluded
+caps = fit_caps(groups["train"], CAPPABLE_NUMERIC_COLUMNS)
 capped = {name: apply_caps(g, caps) for name, g in groups.items()}
-print(distribution_report(groups["train"], capped["train"], NUMERIC_COLUMNS))
+print(distribution_report(groups["train"], capped["train"], CAPPABLE_NUMERIC_COLUMNS))
 ```
 
 ## Illustrative example (synthetic)

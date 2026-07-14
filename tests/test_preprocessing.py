@@ -7,6 +7,8 @@ import pandas as pd
 import pytest
 
 from scorecard.preprocessing import (
+    CAPPABLE_NUMERIC_COLUMNS,
+    CAPPING_EXCLUDED_COLUMNS,
     CATEGORICAL_COLUMNS,
     NUMERIC_COLUMNS,
     apply_caps,
@@ -25,6 +27,25 @@ from scorecard.sample_design import feature_candidate_columns
 def test_numeric_and_categorical_columns_match_feature_candidates():
     assert set(NUMERIC_COLUMNS) | set(CATEGORICAL_COLUMNS) == set(feature_candidate_columns())
     assert set(NUMERIC_COLUMNS).isdisjoint(CATEGORICAL_COLUMNS)
+
+
+def test_zero_inflated_count_columns_excluded_from_capping():
+    assert set(CAPPING_EXCLUDED_COLUMNS) == {"delinq_2yrs", "inq_last_6mths", "pub_rec"}
+    assert set(CAPPING_EXCLUDED_COLUMNS).isdisjoint(CAPPABLE_NUMERIC_COLUMNS)
+    assert set(CAPPABLE_NUMERIC_COLUMNS) | set(CAPPING_EXCLUDED_COLUMNS) == set(NUMERIC_COLUMNS)
+
+
+def test_capping_a_zero_inflated_count_column_would_collapse_signal():
+    # Regression guard for the code-review finding: a blanket 1%/99% cap on a
+    # heavily zero-inflated count column collapses distinct risk levels (2 vs
+    # 5 public records) into the same value - this is why pub_rec etc. are
+    # excluded from CAPPABLE_NUMERIC_COLUMNS above.
+    train = pd.DataFrame({"pub_rec": [0] * 985 + [1] * 10 + [2] * 4 + [5] * 1})
+    caps = fit_caps(train, ["pub_rec"])
+    valid = pd.DataFrame({"pub_rec": [0, 1, 2, 5]})
+    out = apply_caps(valid, caps)
+    assert out["pub_rec"].tolist() == [0, 1, 1, 1]  # demonstrates the collapse
+    assert "pub_rec" not in CAPPABLE_NUMERIC_COLUMNS
 
 
 # --- parse_percent / coerce_percent_columns -----------------------------------

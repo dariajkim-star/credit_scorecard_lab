@@ -39,6 +39,14 @@ CATEGORICAL_COLUMNS: list[str] = [
     "addr_state",
 ]
 
+# Zero-inflated discrete counts (e.g. pub_rec is ~98%+ zero in the real
+# dataset): a blanket 1st/99th percentile cap collapses genuinely different
+# risk levels (2 vs 5 public records) into the same capped value, destroying
+# signal that Story 1.4's WOE binning could otherwise use. Excluded from
+# capping entirely - left as raw counts for optbinning to bin directly.
+CAPPING_EXCLUDED_COLUMNS: list[str] = ["delinq_2yrs", "inq_last_6mths", "pub_rec"]
+CAPPABLE_NUMERIC_COLUMNS: list[str] = [c for c in NUMERIC_COLUMNS if c not in CAPPING_EXCLUDED_COLUMNS]
+
 
 def _assert_matches_feature_candidates() -> None:
     """Guard against this module's column split drifting from Story 1.2's audit."""

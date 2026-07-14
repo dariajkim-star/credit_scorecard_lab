@@ -123,6 +123,15 @@ claude-sonnet-5 (bmad-dev-story)
 - `docs/implementation-artifacts/preprocessing-report-1-3.md` (NEW)
 - `docs/implementation-artifacts/sprint-status.yaml` (MODIFIED — 상태 전이)
 
+## Senior Developer Review (AI)
+
+- 리뷰 일자: 2026-07-14, 도구: claude /code-review (medium)
+- 결과: Changes Requested → 1건 패치 완료(사용자 확인 후), 1건 그대로 defer
+- Findings (2건: CONFIRMED 1 / PLAUSIBLE 1):
+  - [x] [Med/correctness] 모든 NUMERIC_COLUMNS에 동일한 1%/99% 분위수 캡핑 적용 시 `pub_rec` 같은 극도로 치우친(zero-inflated) 카운트형 컬럼에서 실제 다른 위험도(2건 vs 5건)가 동일 값으로 뭉개짐(실증 재현). → 사용자 확인 후 `delinq_2yrs`·`inq_last_6mths`·`pub_rec`를 `CAPPING_EXCLUDED_COLUMNS`로 분리, `CAPPABLE_NUMERIC_COLUMNS`(9개)만 캡핑 대상으로 함. 회귀 가드 테스트 2개 추가.
+  - [ ] [Low/correctness, PLAUSIBLE — defer] train split이 전부 결측이면 `fit_caps`가 (NaN, NaN)을 반환하고 `apply_caps`가 경고 없이 캡핑을 무효화. 실데이터에서 발생 가능성 낮음(피처 후보 컬럼이 전부 결측일 정도면 더 근본적인 데이터 문제) — 낮은 심각도로 그대로 둠.
+
 ## Change Log
 
 - 2026-07-14: Story 1.3 구현 완료 — `%` 문자열 파싱(revol_util), 결측 방치 원칙(대치 없음), train-fit 이상치 캡핑, 전후 분포 리포트. pytest 31 passed(합성 데이터, 실parquet 미존재). Status → review.
+- 2026-07-14: 코드리뷰 1건 패치(zero-inflated 카운트 컬럼 캡핑 제외) + 1건 defer, 33 passed.
