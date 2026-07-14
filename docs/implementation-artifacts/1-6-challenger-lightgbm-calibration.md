@@ -4,7 +4,7 @@ baseline_commit: 90fbe2b
 
 # Story 1.6: LightGBM 챌린저와 Calibration
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
