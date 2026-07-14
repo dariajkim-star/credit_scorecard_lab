@@ -4,7 +4,7 @@ baseline_commit: 4ed30a0
 
 # Story 1.5: 로지스틱 스코어카드 (챔피언)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
