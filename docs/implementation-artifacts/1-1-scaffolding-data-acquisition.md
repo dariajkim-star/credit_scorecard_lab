@@ -156,6 +156,19 @@ claude-opus-4-8 (bmad-dev-story)
 - `tests/test_loading.py` (NEW)
 - `docs/implementation-artifacts/sprint-status.yaml` (MODIFIED — 상태 전이)
 
+## Senior Developer Review (AI)
+
+- 리뷰 일자: 2026-07-14, 도구: claude /code-review (medium, 8앵글 + 1-vote verify)
+- 결과: Changes Requested → 4건 패치 완료, 1건 defer
+- Findings (5건: CONFIRMED 4 / PLAUSIBLE 1):
+  - [x] [High/correctness] `derive_vintage` dtype 플립 — issue_d 파싱 실패 행 존재 시 vintage가 float64로 저장(실증 재현). → `Int64` 명시 캐스팅 + `[warn]` 파싱실패 건수 로그 추가. e2e 재검증 완료(오염 입력에서도 parquet vintage=Int64).
+  - [x] [Med/test-coverage] 2015+36m 상한 경계 케이스 픽스처 부재. → 픽스처에 "Nov-2015/36m → keep" 행 추가, dtype 안정성 테스트 신설.
+  - [x] [Low/simplification] `set_global_seed`의 도달 불가 `except ImportError` 죽은 코드. → 무조건 import로 단순화.
+  - [x] [Low/altitude] `KAGGLE_DATASET`·`ACCEPTED_GLOB` 하드코딩. → `scorecard/config.py`로 이동(단일 소스), 01_download.py는 import.
+  - [ ] [Low/correctness, PLAUSIBLE — defer] kagglehub 경로 broad `except Exception`이 버그/다운로드 실패 미구분. 1회성 CLI라 심각도 낮음 — 실다운로드에서 문제 시 재방문.
+- 기각: 12개 CAP 스텁(스토리 명시 허용), emp_title dtype(이미 string), summarize 딕셔너리 빌드(사소).
+
 ## Change Log
 
 - 2026-07-13: Story 1.1 구현 완료 — 그린필드 스캐폴딩(Structural Seed), 재현성 유틸(config.py), Lending Club 다운로드·필터 파이프라인(loading.py + 01_download.py), README 데이터확보/폴백 문서, pytest 골격(9 passed). Status → review.
+- 2026-07-14: 코드리뷰 4건 패치(vintage Int64 고정·경계 테스트·죽은 코드 제거·상수 config 이동), 10 passed + e2e 재검증.

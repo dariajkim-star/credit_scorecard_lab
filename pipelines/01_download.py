@@ -27,11 +27,19 @@ import pandas as pd
 # Allow running as a script: ensure project root on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipelines.loading import DTYPES, USECOLS, filter_accepted, summarize  # noqa: E402
-from scorecard.config import ACCEPTED_PARQUET, DATA_DIR  # noqa: E402
-
-KAGGLE_DATASET = "wordsforthewise/lending-club"
-ACCEPTED_GLOB = "accepted_*.csv.gz"
+from pipelines.loading import (  # noqa: E402
+    DTYPES,
+    USECOLS,
+    derive_vintage,
+    filter_accepted,
+    summarize,
+)
+from scorecard.config import (  # noqa: E402
+    ACCEPTED_GLOB,
+    ACCEPTED_PARQUET,
+    DATA_DIR,
+    KAGGLE_DATASET,
+)
 
 FALLBACK_MSG = (
     "\n[FALLBACK] kagglehub download failed. Manual options:\n"
@@ -69,6 +77,9 @@ def load_and_filter(csv_path: Path) -> pd.DataFrame:
         compression="infer",
     )
     print(f"[load] raw rows: {len(raw):,}")
+    n_unparseable = int(derive_vintage(raw["issue_d"]).isna().sum())
+    if n_unparseable:
+        print(f"[warn] {n_unparseable:,} rows with unparseable issue_d (excluded)")
     filtered = filter_accepted(raw)
     print(f"[filter] rows after 2012-2015 / 36m: {len(filtered):,}")
     return filtered

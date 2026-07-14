@@ -28,19 +28,19 @@ VINTAGE_MAX: int = 2015
 TERM_MONTHS: int = 36
 ACCEPTED_PARQUET: Path = DATA_DIR / "lc_accepted_2012_2015_36m.parquet"
 
+# Data source fixation: Kaggle dataset slug and the accepted-loans file glob.
+KAGGLE_DATASET: str = "wordsforthewise/lending-club"
+ACCEPTED_GLOB: str = "accepted_*.csv.gz"
+
 
 def set_global_seed(seed: int = RANDOM_SEED) -> int:
     """Seed Python's ``random`` and NumPy so runs are reproducible.
 
-    Returns the seed used so callers can log it. NumPy is imported lazily to
-    keep this module importable before dependencies are installed.
+    Returns the seed used so callers can log it.
     """
+    import numpy as np
+
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
-    try:
-        import numpy as np
-
-        np.random.seed(seed)
-    except ImportError:  # numpy not installed yet (bare scaffolding)
-        pass
+    np.random.seed(seed)
     return seed

@@ -73,9 +73,14 @@ DTYPES: dict[str, str] = {
 
 
 def derive_vintage(issue_d: pd.Series) -> pd.Series:
-    """Parse the origination year from Lending Club's ``issue_d`` ("Dec-2015")."""
+    """Parse the origination year from Lending Club's ``issue_d`` ("Dec-2015").
+
+    Returns nullable ``Int64`` so the dtype is stable whether or not any rows
+    fail to parse (plain ``.dt.year`` flips int32 -> float64 on the first NaT,
+    which would leak a float vintage column into the saved parquet).
+    """
     parsed = pd.to_datetime(issue_d, format="%b-%Y", errors="coerce")
-    return parsed.dt.year
+    return parsed.dt.year.astype("Int64")
 
 
 def parse_term_months(term: pd.Series) -> pd.Series:
