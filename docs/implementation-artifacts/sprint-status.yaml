@@ -76,7 +76,7 @@ development_status:
   2-1-cutoff-simulation-swapset: done
   2-2-reason-codes: done  # 2026-07-16: 3-레이어 리뷰 patch 7건 반영(부호 일반화·정렬 검증·가드), 128 passed
   2-3-fastapi-scoring-serving: done  # 2026-07-16: 3-레이어 리뷰 patch 12건 반영(등급경계·NaN가드·미확인카테고리·배치선검증·SHAP락 등), 151 passed
-  2-4-profit-based-cutoff: backlog
+  2-4-profit-based-cutoff: ready-for-dev  # 2026-07-16: 스토리 생성 — loan_amnt 조인 갭 실측 발견·해소방안 결정기록, 오픈퀘스천 2건
   2-5-streamlit-dashboard: backlog
   epic-2-retrospective: optional
   epic-3: backlog
