@@ -82,6 +82,6 @@ development_status:
   epic-3: in-progress  # 2026-07-16: 3-1 착수
   3-1-rule-efficiency-audit: done  # 2026-07-16: 3-레이어 리뷰 patch 6건 반영(no-rows/None 방어·id-키 조인·nan배 가드·§8 정합), 203 passed, 라이브 재실증
   3-2-text-features-emp-title: done  # 2026-07-16: 리뷰 patch 8건(tie-break 결정화·재현 경로 iv_comparison()·WOE 방향 표·누수 실증 등), 215 passed
-  3-3-sas-replication: ready-for-dev  # 2026-07-16: SAS 계정 확보 확인→풀 구현. .sas 자동생성+Python 미러로 산술 증명, 실환경 tie-out은 사용자 실행
+  3-3-sas-replication: review  # 2026-07-16: .sas 자동생성+미러 대조(12건 max 4.7e-07), 221 passed, 사용자 OnDemand tie-out 대기
   3-4-mdd-readme-github: backlog
   epic-3-retrospective: optional
