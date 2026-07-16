@@ -356,3 +356,34 @@ def test_profit_cutoff_rejects_non_finite_avg_loan_amnt(client):
         headers={"Content-Type": "application/json"},
     )
     assert r.status_code == 422
+
+
+# --- Story 3.1: /v1/rules/efficiency -----------------------------------------
+
+
+def test_rules_efficiency_schema_and_content(client):
+    body = client.get("/v1/rules/efficiency").json()
+    assert body["assumptions"]  # honesty note always present
+    rules = body["rules"]
+    assert len(rules) >= 3  # AC: 3+ hard rules
+    for r in rules:
+        assert set(r) == {
+            "rule_id", "description", "excluded_count", "excluded_bad_rate",
+            "population_bad_rate", "opportunity_loss_est", "verdict",
+        }
+        assert r["verdict"]  # rule-based rationale, non-empty
+        # excluded_bad_rate nullable but non-null when anyone is excluded
+        if r["excluded_count"] > 0:
+            assert r["excluded_bad_rate"] is not None
+
+
+def test_rules_efficiency_model_query(client):
+    champ = client.get("/v1/rules/efficiency?model=champion")
+    chall = client.get("/v1/rules/efficiency?model=challenger")
+    assert champ.status_code == 200 and chall.status_code == 200
+    # verdicts depend on the model's score overlap, so the two need not match
+    assert len(champ.json()["rules"]) == len(chall.json()["rules"])
+
+
+def test_rules_efficiency_rejects_bad_model(client):
+    assert client.get("/v1/rules/efficiency?model=nope").status_code == 422

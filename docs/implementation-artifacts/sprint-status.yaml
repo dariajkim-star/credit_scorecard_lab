@@ -80,7 +80,7 @@ development_status:
   2-5-streamlit-dashboard: done  # 2026-07-16: 3-레이어 리뷰 patch 8건 반영(비JSON 매핑·null 방어·color domain 고정 등), 189 passed, 라이브 재검증
   epic-2-retrospective: optional
   epic-3: in-progress  # 2026-07-16: 3-1 착수
-  3-1-rule-efficiency-audit: ready-for-dev  # 2026-07-16: 스토리 생성 — 룰 입력 raw 조인 갭(2.4 동형)·가상 룰셋·verdict 규칙 명시
+  3-1-rule-efficiency-audit: review  # 2026-07-16: rule_efficiency.py + /v1/rules/efficiency, 세 룰 모두 재검토 권장 발견, 201 passed, 라이브 실증
   3-2-text-features-emp-title: backlog
   3-3-sas-replication: backlog
   3-4-mdd-readme-github: backlog

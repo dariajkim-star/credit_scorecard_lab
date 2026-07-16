@@ -28,6 +28,7 @@ from scorecard.evaluation import compute_metrics, population_stability_index
 from scorecard.grading import validate_monotonic
 from scorecard.profit import load_profit_frame, profit_cutoff_curve
 from scorecard.reasons import build_challenger_explainer
+from scorecard.rule_efficiency import load_rule_frame
 
 logger = logging.getLogger("app.loader")
 
@@ -83,6 +84,11 @@ class ModelStore:
     # avg_loan_amnt instead of re-scanning the ~283k-row population on every
     # call (same precompute-at-startup pattern as `curves` above).
     profit_base_curves: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Story 3.1: the AD-3 frame + rule-input columns (dti/delinq_2yrs/
+    # inq_last_6mths/loan_amnt) joined once from the raw parquet. The rule
+    # audit is a cheap set of masks computed per request off this frame (the
+    # ruleset and cutoff are fixed, so it needs no precomputed curve).
+    rule_frame: pd.DataFrame | None = None
 
     def model_version(self, model_type: str) -> str:
         return self.manifests.get(model_type, {}).get("model_version", "unknown")
@@ -212,6 +218,7 @@ def load_store() -> ModelStore:
         if not ACCEPTED_PARQUET.exists():
             raise FileNotFoundError(f"raw accepted parquet missing: {ACCEPTED_PARQUET}")
         profit_frame = load_profit_frame(store.frame, ACCEPTED_PARQUET)
+        store.rule_frame = load_rule_frame(store.frame, ACCEPTED_PARQUET)
 
         store.explainer = build_challenger_explainer(store.bundles["challenger"])
 

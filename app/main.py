@@ -26,6 +26,7 @@ from scorecard.grading import assign_grade
 from scorecard.preprocessing import CATEGORICAL_COLUMNS
 from scorecard.profit import find_optimal_cutoff
 from scorecard.reasons import challenger_reason_codes, champion_reason_codes
+from scorecard.rule_efficiency import rule_efficiency
 
 logger = logging.getLogger("app.api")
 
@@ -377,5 +378,27 @@ def simulate_profit_cutoff(payload: schemas.ProfitCutoffRequest) -> schemas.Prof
             "평균 대출금액은 요청 파라미터(avg_loan_amnt)로 스케일링하며, 실제 승인 건별 대출금액 분포는 반영하지 않는다.",
             "회수율(recoveries)·상환액(total_pymnt)은 검증 표본의 실측치를 그대로 사용하며, 향후 금리·매크로 환경 변화는 반영하지 않는다.",
             "이 값은 손익 시뮬레이션이며 실제 재무 데이터가 아니다.",
+        ],
+    )
+
+
+@app.get("/v1/rules/efficiency")
+def rules_efficiency(
+    model: schemas.ModelChoiceSingle = Query("champion"),
+) -> schemas.RuleEfficiencyResponse:
+    _require_loaded()
+    # model query is an ADDITION to API_SPEC §8 (AD-5-compliant): the model-
+    # overlap signal in each verdict compares against that model's score, and
+    # champion/challenger sit on different score distributions.
+    rules = rule_efficiency(STORE.rule_frame, model, CURRENT_CUTOFF)
+    logger.info("rule efficiency audit: model_version=%s rules=%d",
+                STORE.model_version(model), len(rules))
+    return schemas.RuleEfficiencyResponse(
+        rules=[schemas.RuleEfficiency(**r) for r in rules],
+        assumptions=[
+            "하드룰셋은 실무 관행(과다부채·신용조회·연체이력)에 근거해 설계한 가상 룰이며, 실제 운영 정책이 아니다.",
+            "배제집단 진단은 OOT 검증 표본(2015 빈티지) 기준이며, 표본을 1년치 승인 모집단으로 가정한다.",
+            "기회손실은 배제된 우량(미부도) 대출의 실현 이익 합(양수만)으로 추정하며, 실제 재무 데이터가 아니다.",
+            "verdict는 배제집단 부도율 배수와 모형 컷오프 중복도로 산출한 규칙 기반 판정이다(LLM 아님).",
         ],
     )

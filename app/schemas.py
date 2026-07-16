@@ -144,3 +144,23 @@ class ProfitCutoffResponse(BaseModel):
     delta: ProfitDelta
     curve: list[ProfitCurvePoint]
     assumptions: list[str] = Field(..., min_length=1)
+
+
+class RuleEfficiency(BaseModel):
+    rule_id: str
+    description: str
+    excluded_count: int
+    # None (not 0.0) when a rule excludes nobody: the bad rate is undefined,
+    # not zero (mirrors the profit/cutoff nullable convention).
+    excluded_bad_rate: float | None
+    population_bad_rate: float
+    opportunity_loss_est: float
+    verdict: str
+
+
+class RuleEfficiencyResponse(BaseModel):
+    rules: list[RuleEfficiency]
+    # Not in API_SPEC §8's minimal example, but the ruleset is hypothetical -
+    # the honesty note travels with the response (consulting-artifact
+    # convention, same as the profit endpoint's assumptions).
+    assumptions: list[str] = Field(..., min_length=1)
