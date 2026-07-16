@@ -74,7 +74,7 @@ development_status:
   epic-1-retrospective: optional
   epic-2: in-progress
   2-1-cutoff-simulation-swapset: done
-  2-2-reason-codes: backlog
+  2-2-reason-codes: review
   2-3-fastapi-scoring-serving: backlog
   2-4-profit-based-cutoff: backlog
   2-5-streamlit-dashboard: backlog
