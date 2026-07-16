@@ -1,7 +1,8 @@
 # credit-scorecard-lab
 
 **Lending Club 실데이터 58.9만 건으로 신용평가 스코어카드를 개발하고, 점수를 심사 전략으로 번역한 포트폴리오 프로젝트.**
-모형 개발(WOE 스코어카드 + LightGBM) → FastAPI 서빙 → Streamlit 대시보드까지 end-to-end로 동작하며,
+
+만든 것: **7변수 WOE 스코어카드(챔피언) + LightGBM(챌린저) → FastAPI 8엔드포인트 → Streamlit 4화면 대시보드 → SAS 이식**까지 전부 동작하는 end-to-end 시스템(테스트 221개).
 "모델러"가 아니라 **심사 전략을 제안하는 컨설턴트** 관점의 산출물(손익 cutoff·룰 진단)에 무게를 둡니다.
 
 ## 핵심 수치 한눈에
@@ -18,17 +19,17 @@
 | 테스트 | **221 passed** |
 
 > **성능 목표 미달을 숨기지 않습니다.** train/valid/OOT 성능차가 거의 없어(0.6468/0.6406/0.6430) **과적합은 없으며**,
-> 신청시점 7변수만 쓰고 `grade`·`int_rate`(= Lending Club 자체 심사 결과)를 배제한 **방법론적 선택의 트레이드오프**입니다.
-> 숫자를 위해 순환논리를 허용하지 않았습니다. → [원인 분석](docs/MDD.md#5-성능-평가-3면--목표-미달과-그-원인)
+> 신청시점 7변수만 쓰고 `grade`·`int_rate`(= Lending Club 자체 심사 결과의 대리변수)를 배제한 **방법론적 선택의 트레이드오프**입니다.
+> → [원인 분석](docs/MDD.md#5-성능-평가-trainvalidoot-3분할--목표-미달과-그-원인)
 
 ## 이 프로젝트의 발견 3가지
 
-**1. 손익 최적 cutoff은 리스크 cutoff보다 훨씬 낮다** — 챔피언 기준 **546.01 → 494.43**, 승인율 **+52.29pp**, 연간 기대손익 **+₩131.8M**.
-이자수익이 부도손실을 상쇄하는 구간이 리스크 관점의 거절 영역까지 뻗어 있습니다. **CX와 수익이 대립하지 않는다**는 정량적 근거.
-→ [경영진 1페이저](docs/implementation-artifacts/profit-cutoff-onepager-2-4.md)
+**1. 승인 모집단 안에서는 리스크 cutoff이 손익 관점에서 과도하게 보수적이다** — 챔피언 기준 손익 곡선의 최대점이 탐색 하단(**546.01 → 494.43**, 승인율 **+52.29pp**, 연간 기대손익 **+$132M**)까지 내려갑니다.
+단, 이는 **이미 승인된 대출만 있는 데이터의 구조적 결과이기도 합니다**(거절분이 없어 곡선 하단이 꺾이지 않음) — 발견과 한계(reject inference)를 함께 읽어야 하며, 그 진단 자체가 이 분석의 가치입니다.
+→ [경영진 1페이저](docs/implementation-artifacts/profit-cutoff-onepager-2-4.md) · [한계 분석](docs/MDD.md#101-reject-inference--이-모형의-가장-근본적-한계)
 
-**2. 스코어카드가 있으면 하드룰의 상당수는 중복이거나 비효율이다** — 가상 룰 3종 진단 결과 **전부 재검토 권장**.
-DTI·조회 룰은 배제집단의 **85~94%를 모형이 이미 거절**(중복), 연체 룰은 모집단의 21%를 거절하면서 판별력 **1.07배**(기회손실 **₩9,441만**).
+**2. 스코어카드가 있으면 하드룰의 상당수는 중복이거나 비효율이다** — **실무 관행을 본떠 설계한 가상 룰 3종**을 진단한 결과 **전부 재검토 권장**.
+DTI·조회 룰은 배제집단의 **85~91%를 모형이 이미 거절**(챔피언 기준, 중복), 연체 룰은 모집단의 21%를 거절하면서 판별력 **1.07배**(기회손실 **$94.4M**).
 → [룰 정비 제안](docs/implementation-artifacts/rule-efficiency-report-3-1.md)
 
 **3. 비금융 텍스트(직함)는 이 데이터에서 효과가 없었다** — `emp_title` 파생변수 IV **0.0116**(임계 0.02 미달, 전 정형변수보다 낮음).
@@ -78,7 +79,7 @@ data/ (raw parquet)
 | # | 내용 | 산출물 |
 |---|---|---|
 | ① | **손익 기반 cutoff** — 리스크가 아닌 실현손익으로 cutoff 평가 | [1페이저](docs/implementation-artifacts/profit-cutoff-onepager-2-4.md) · `POST /v1/simulate/profit-cutoff` |
-| ② | **룰 효율성 진단** — 하드룰이 모형 대비 값을 하는지 규칙 기반 판정 | [리포트](docs/implementation-artifacts/rule-efficiency-report-3-1.md) · `GET /v1/rules/efficiency` |
+| ② | **룰 효율성 진단** — 하드룰이 모형 대비 실질 기여가 있는지 규칙 기반 판정 | [리포트](docs/implementation-artifacts/rule-efficiency-report-3-1.md) · `GET /v1/rules/efficiency` |
 | ③ | **비금융 텍스트 검증** — emp_title 파생변수 IV 측정(네거티브 결과) | [리포트](docs/implementation-artifacts/text-features-report-3-2.md) |
 | ④ | **SAS 이식** — 점수 산출 로직을 SAS로 이식·대조 (미러 오차 **4.74e-07**, 기준 0.5) | [대조 리포트](docs/implementation-artifacts/sas-replication-report-3-3.md) · [`sas/scorecard_scoring.sas`](sas/scorecard_scoring.sas) |
 

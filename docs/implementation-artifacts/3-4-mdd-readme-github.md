@@ -4,7 +4,7 @@ baseline_commit: a73f4fb
 
 # Story 3.4: MDD·README·GitHub 공개 (Epic 3 마지막)
 
-Status: review
+Status: done
 
 ## Story
 
@@ -52,6 +52,23 @@ so that 채용담당자가 5분 안에, 실무 면접관이 깊이 있게 프로
   - [x] 에픽 3 DoD: 데모 산출물(1페이저 2-4·룰 리포트 3-1·텍스트 리포트 3-2·SAS 대조 3-3 + 대시보드 스크린샷) 점검 + git 커밋 + 옵시디언 미러.
   - [x] `pytest -q` 전체 통과 확인(문서 스토리지만 회귀 없음 확인).
   - [x] epic-3 → done 전환은 3-4 done + (3-3 사용자 SAS tie-out 확인 여부 반영) 후 sprint-status.yaml에서.
+
+### Review Findings (2026-07-16, 3-레이어: Fact-checker/Auditor/Reader-experience)
+
+- [x] [Review][Patch] **통화 오기(치명)** — 손익 수치가 ₩로 표기됐으나 원 출처(profit-cutoff-onepager-2-4)는 **USD(+$132M)**이며 "원화 환산 없이 원 통화 그대로"라는 명시 경고까지 있음. LC 데이터는 USD. MDD·README의 ₩131.8M→**+$132M**, 기회손실 ₩9,441만→**$94.4M**로 정정. **rule-efficiency-report-3-1.md의 ₩ 표기도 동일 오류**(같은 세션에서 전파) — 함께 정정 [MDD.md, README.md, rule-efficiency-report-3-1.md] (fact-checker, High)
+- [x] [Review][Patch] **손익 최적 cutoff 494.43은 경계해** — 점수 최소값 496보다 낮음 = 탐색 구간 하단 = 사실상 "전원 승인". "발견"이 아니라 **accepted-only 데이터에서 손익 곡선이 준단조라는 진단 신호**로 재프레이밍(LC가 이미 하위 신청을 거절했으므로 잔존 최하위도 이자수익이 남는 구조적 필연 — reject inference 한계와 연결). §9/README의 "CX와 수익은 대립하지 않는다" 단정도 조건부로 완화(§10.1이 스스로 무효화하는 내부 모순 해소) [MDD §7.2·§9, README 발견1] (reader, High)
+- [x] [Review][Patch] README에 룰이 **가상**임을 발견2 문장 안에 명시(현재는 수치가 실측처럼 병렬) + DTI 룰 **n=34 소표본** 주의를 MDD §7.3에 병기(부도율 23.5%의 표준오차 ±7pp 수준, 다른 두 룰과 증거 강도가 다름) [README, MDD §7.3] (reader, High)
+- [x] [Review][Patch] **int_rate 배제 근거 표현 정정** — "라벨과 순환논리"는 부정확. 정확히는 "타 기관(LC) 심사 결과의 대리변수 + 자사 신규 심사 시점에 부재". 아울러 §7.2 손익이 실현 상환액(int_rate 반영)을 쓰는 것은 **피처가 아니라 성과(outcome) 데이터 사용**이라는 구분을 한 줄 명시(비대칭 해명) [MDD §2.5·§5·§7.2] (reader, Med-High)
+- [x] [Review][Patch] "과적합 없음 ⇒ 정보 상한" 논리 비약 완화 — 과소적합과 구별 불가, 7변수는 본인이 좁힌 선택. "상한에 가깝다" 단정 대신 "추가 정보 없이는 개선 여지가 제한적임을 시사(17변수 벤치마크 미수행은 한계)"로 [MDD §5] (reader, Med-High)
+- [x] [Review][Patch] swap-set 서술 보강 — swap_in 부도율 13.55% 병기(대칭 비교), "실증"→"방향성 시사"로 완화(AUC 차 0.0022는 노이즈 수준) [MDD §7.1] (reader, Med)
+- [x] [Review][Patch] PSI 해석 한 줄 추가 — 빈티지 부도율이 12.70→14.89%로 이동했는데 점수 PSI 0.005는 "안정"인 동시에 그 이동을 점수가 못 담는다는 "둔감"일 수 있음(낮은 KS와 정합) [MDD §6.2] (reader, Med)
+- [x] [Review][Patch] base_odds=50/base_score=600 앵커가 실제 포트폴리오 odds(~5.7:1)와 다름을 명시 — 관행 앵커일 뿐 보정된 값 아니며 점수는 서열 도구로 사용 [MDD §4.1] (reader, Med)
+- [x] [Review][Patch] 현재 cutoff 546.01의 출처·성격 명시 — Story 2.1 리포트의 데모 관행값(실제 정책 아님), +52.29pp의 분모라는 점에서 해명 필수 [MDD §7.2] (reader, Med)
+- [x] [Review][Patch] README "85~94%"→"85~91%(챔피언 기준)" 정밀화(두 모델 수치 뭉갬) + 소소한 표현: "값을 하는지"→격식체, "3면 평가"→"train/valid/OOT 3분할 평가"로 첫 등장 시 병기, "미러" 첫 등장 정의, README 상단에 "무엇을 만들었나" 한 문장 [README, MDD] (auditor+reader, Low-Med)
+- [x] [Review][Patch] Parcelling 서술 정밀화 — "확률적 배정(random assignment)" 명시 [MDD §10.1] (reader, Low)
+- [x] [Review][Defer] **통화 오류의 코드·계약 흔적** — `app/schemas.py`의 `annual_profit_krw` 필드명(API_SPEC §7 예시에서 유래), 대시보드 `fmt_krw`(₩ 포맷)도 동일 혼동의 산물. 필드명 변경은 파괴적(계약)이라 /v2 또는 별도 결정 필요 — deferred-work 기록 [app/schemas.py, dashboard/app.py, API_SPEC §7] — deferred
+
+dismiss: PSI valid→OOT 수치의 출처(1-7b 아님, 2-3/2-5) — MDD §6.2가 이미 "서빙 API·대시보드"로 올바르게 표기(fact-checker 확인).
 
 ## Dev Notes
 
@@ -156,5 +173,6 @@ claude-opus-4-8 (bmad-dev-story)
 
 ## Change Log
 
+- 2026-07-16: 3-레이어 문서 리뷰(Fact-checker/Auditor/Reader-experience) — patch 11건 반영. 핵심: ①**통화 오기 정정(₩→$)** — 손익 +$132M·기회손실 $94.4M, 원 출처(2-4 1페이저)의 USD 원칙 위반을 3-1 리포트까지 소급 수정 ②**손익 최적점 494.43=경계해 재프레이밍** — 점수 최소값(496) 미만=사실상 전원 승인, accepted-only 구조적 결과로 진단하고 reject inference와 연결, CX/DX 단정 조건부화 ③DTI 룰 n=34 소표본 주의 ④int_rate 배제 근거 정정(순환논리→타사 스코어 대리변수+신규심사 부재)+손익의 outcome 사용 구분 ⑤정보상한 논리 완화 ⑥swap-set 완화(swap_in 13.55% 병기) ⑦PSI 둔감 양면 해석 ⑧base_odds 앵커 한계 ⑨546.01 출처 명시 ⑩README 85~91%·상단 한줄·표현 정리 ⑪Parcelling 확률적 배정. deferred: annual_profit_krw 필드명·fmt_krw(계약 변경 필요). 링크·앵커 ALL OK, ₩ 잔존 0. Status → done.
 - 2026-07-16: Story 3.4 구현 — docs/MDD.md 신규(12장, reject inference 4단 서술 포함, 전 수치 출처 링크) + README 전면 개편(5분 파악, 발견 3가지, 스크린샷 인라인) + CX/DX 섹션(재해석만) + 공개 점검(커밋 이력 clean·링크 ALL OK) + 옵시디언 14번 미러. 작성 중 PSI 비교축 출처 오기 발견·수정(train→OOT vs valid→OOT 구분). 코드 변경 0, 221 passed. Status → review.
 - 2026-07-16: Story 3.4 생성 — Epic 3 마지막(문서화). NFR4의 reject inference를 SPEC non-goal(구현 제외→서술 대체)에 맞춰 "왜 문제/대표 기법 서술/안 한 이유/향후"의 4단 구성으로 명세, 실측 수치 12항목을 출처 리포트와 함께 표로 고정(임의 수치 금지), README stale 상태(1.1 진행중) 확인 후 5분 파악 구조 설계, 스크린샷·리포트 재사용 지도 작성, 사용자 요청 CX/DX 임팩트 섹션을 "기존 지표 재해석(코드 0)"으로 스코프 한정하고 본격 CX는 P2 소관으로 경계.

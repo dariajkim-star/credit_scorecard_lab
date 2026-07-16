@@ -19,6 +19,10 @@
 - **등급표에서 OOT 관측 0건인 등급이 monotonic 검증에서 조용히 제외** [app/loader.py:_grade_table, scorecard/grading.py:validate_monotonic] — `observed_bad_rate=None` 행이 dropna로 빠지면서 그 등급의 데이터 공백이 monotonic_validated=true에 반영 안 됨. `grading.py` 변경(빈 등급 명시 플래그)이 필요해 서빙 스토리 범위 밖.
 - **`/v1/score`가 `SingleScoreResponse`/`BothScoreResponse` 두 타입을 반환하는데 명시 response_model 없음** [app/main.py] — 쿼리파라미터(`model=both`)에 따라 셰이프가 달라지는 의도된 패턴이라 FastAPI의 단일 response_model로 표현 불가. OpenAPI 문서화 개선(oneOf 등)은 대시보드(2.5) 연동 시 필요성 재평가.
 
+## Deferred from: code review (story-3-4) (2026-07-16)
+
+- **통화 혼동의 코드·계약 흔적 — `annual_profit_krw` 필드명과 `fmt_krw`** [app/schemas.py:ProfitDelta, dashboard/app.py:fmt_krw, API_SPEC §7] — 3-4 문서 리뷰에서 손익 수치가 USD(LC 데이터 원 통화)인데 ₩로 표기돼 온 오류를 발견·정정(문서는 수정 완료). 그러나 API 필드명 `annual_profit_krw`(API_SPEC §7 예시에서 유래)와 대시보드의 ₩ 포맷터는 같은 혼동의 산물로 남아 있음. 필드명 변경은 파괴적 계약 변경이라 `/v1` 내 불가(§9 버저닝) — `/v2` 시점 또는 `annual_profit`(통화 중립) 별칭 추가를 결정할 때 처리. 대시보드 fmt_krw→fmt_usd 교체는 저비용이나 계약 필드명과의 일관성 때문에 함께 결정 권장.
+
 ## Deferred from: code review (story-3-1) (2026-07-16)
 
 - **`opportunity_loss_est`가 양수 실현손익만 합산 → 순 포트폴리오 수치와 tie-out 불가** [scorecard/rule_efficiency.py:_opportunity_loss] — Task 3에서 "배제된 우량 대출의 놓친 이익"으로 의도한 정의(리포트에 명시). 순액(양수-음수) 지표나 포트폴리오 대조가 필요해지면 별도 필드로 추가.
