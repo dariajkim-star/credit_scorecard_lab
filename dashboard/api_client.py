@@ -21,7 +21,11 @@ def base_url() -> str:
     """Resolved at call time (not import time) so tests and demos can point
     the dashboard at a different host via DASHBOARD_API_URL without reloading
     the module."""
-    return os.environ.get("DASHBOARD_API_URL", DEFAULT_BASE_URL).rstrip("/")
+    # `or` (not a .get default) so an empty/whitespace value falls back too -
+    # an empty base URL turns every request into a confusing MissingSchema
+    # error instead of a clean "server not running" notice (code review).
+    url = os.environ.get("DASHBOARD_API_URL", "").strip() or DEFAULT_BASE_URL
+    return url.rstrip("/")
 
 
 class ApiUnavailable(Exception):
@@ -33,14 +37,26 @@ class ApiUnavailable(Exception):
     """
 
 
+def _check(path: str, resp: requests.Response) -> dict:
+    """Shared status + body validation for _get/_post (kept in one place so
+    the two paths can't drift). resp.json() is inside the error mapping: a
+    200 with a non-JSON body (wrong process on the port, proxy error page)
+    must surface as ApiUnavailable, not a raw JSONDecodeError traceback on
+    the screen (code review finding)."""
+    if resp.status_code != 200:
+        raise ApiUnavailable(f"{path} → HTTP {resp.status_code}: {resp.text[:200]}")
+    try:
+        return resp.json()
+    except ValueError as e:
+        raise ApiUnavailable(f"{path} → 200이지만 JSON이 아닌 응답: {e}") from e
+
+
 def _get(path: str, params: dict | None = None) -> dict:
     try:
         resp = requests.get(base_url() + path, params=params, timeout=TIMEOUT_S)
     except requests.RequestException as e:
         raise ApiUnavailable(f"{path} 요청 실패: {e}") from e
-    if resp.status_code != 200:
-        raise ApiUnavailable(f"{path} → HTTP {resp.status_code}: {resp.text[:200]}")
-    return resp.json()
+    return _check(path, resp)
 
 
 def _post(path: str, body: dict) -> dict:
@@ -48,9 +64,7 @@ def _post(path: str, body: dict) -> dict:
         resp = requests.post(base_url() + path, json=body, timeout=TIMEOUT_S)
     except requests.RequestException as e:
         raise ApiUnavailable(f"{path} 요청 실패: {e}") from e
-    if resp.status_code != 200:
-        raise ApiUnavailable(f"{path} → HTTP {resp.status_code}: {resp.text[:200]}")
-    return resp.json()
+    return _check(path, resp)
 
 
 def check_health() -> dict:

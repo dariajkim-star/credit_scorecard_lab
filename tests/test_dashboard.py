@@ -15,9 +15,11 @@ import requests
 from dashboard import api_client
 from dashboard.app import (
     fmt_krw,
+    fmt_metric,
     fmt_pct,
     grades_to_chart_rows,
     profit_curve_to_rows,
+    target_delta,
 )
 
 
@@ -119,7 +121,62 @@ def test_non_200_maps_to_api_unavailable(monkeypatch):
     assert raised
 
 
+def test_200_with_non_json_body_maps_to_api_unavailable(monkeypatch):
+    # A 200 from the wrong process on the port (HTML error page, proxy) must
+    # become ApiUnavailable, not a raw JSONDecodeError on the screen.
+    class _HtmlResp:
+        status_code = 200
+        text = "<html>not json</html>"
+
+        def json(self):
+            raise ValueError("Expecting value")
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _HtmlResp())
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _HtmlResp())
+    monkeypatch.setattr(api_client, "base_url", lambda: "http://x")
+    for call in (
+        lambda: api_client.get_model_info(),
+        lambda: api_client.simulate_cutoff(546.0, "champion"),
+    ):
+        try:
+            call()
+            raised = False
+        except api_client.ApiUnavailable:
+            raised = True
+        assert raised
+
+
+def test_post_connection_error_maps_to_api_unavailable(monkeypatch):
+    def boom(*a, **k):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(requests, "post", boom)
+    monkeypatch.setattr(api_client, "base_url", lambda: "http://x")
+    try:
+        api_client.simulate_profit_cutoff("champion", 12000)
+        raised = False
+    except api_client.ApiUnavailable:
+        raised = True
+    assert raised
+
+
+def test_base_url_empty_env_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_API_URL", "")
+    assert api_client.base_url() == api_client.DEFAULT_BASE_URL
+    monkeypatch.setenv("DASHBOARD_API_URL", "   ")
+    assert api_client.base_url() == api_client.DEFAULT_BASE_URL
+
+
 # ---- pure display helpers ----
+
+
+def test_fmt_metric_and_target_delta_handle_none():
+    # Server's loader._clean legitimately returns null for degenerate
+    # metrics - present-but-null must not crash screen 1.
+    assert fmt_metric(None) == "—"
+    assert fmt_metric(0.2054) == "0.2054"
+    assert target_delta(None, 0.25) is None
+    assert target_delta(0.2054, 0.25) == "목표 0.25 대비 -0.0446"
 
 
 def test_fmt_pct_and_krw_handle_none():

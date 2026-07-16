@@ -72,12 +72,12 @@ development_status:
   1-7a-evaluation-grading: done
   1-7b-psi-validation-frame-manifest: done
   epic-1-retrospective: optional
-  epic-2: in-progress
+  epic-2: done  # 2026-07-16: 2-1~2-5 전부 done, 에픽 DoD(라이브 데모+스크린샷+커밋+옵시디언 미러) 충족
   2-1-cutoff-simulation-swapset: done
   2-2-reason-codes: done  # 2026-07-16: 3-레이어 리뷰 patch 7건 반영(부호 일반화·정렬 검증·가드), 128 passed
   2-3-fastapi-scoring-serving: done  # 2026-07-16: 3-레이어 리뷰 patch 12건 반영(등급경계·NaN가드·미확인카테고리·배치선검증·SHAP락 등), 151 passed
   2-4-profit-based-cutoff: done  # 2026-07-16: 리뷰 patch 8건 반영(zero-approval argmax·조인 팬아웃·nullable 스키마·422-inf 등), 175 passed, 라이브 재실증
-  2-5-streamlit-dashboard: review  # 2026-07-16: dashboard/ 4화면 구현, 라이브 배선 실증(액세스 로그+모델 전환 재조회), 185 passed
+  2-5-streamlit-dashboard: done  # 2026-07-16: 3-레이어 리뷰 patch 8건 반영(비JSON 매핑·null 방어·color domain 고정 등), 189 passed, 라이브 재검증
   epic-2-retrospective: optional
   epic-3: backlog
   3-1-rule-efficiency-audit: backlog

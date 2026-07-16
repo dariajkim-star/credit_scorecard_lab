@@ -46,6 +46,23 @@ def fmt_krw(value: float | None) -> str:
     return f"₩{value:,.0f}"
 
 
+def fmt_metric(value: float | None, digits: int = 4) -> str:
+    """Plain number for st.metric. None → em dash: the server's loader._clean
+    legitimately returns null for degenerate metrics (2.3 review), and
+    dict.get defaults don't cover present-but-null (code review finding)."""
+    if value is None:
+        return "—"
+    return f"{value:.{digits}f}"
+
+
+def target_delta(value: float | None, target: float) -> str | None:
+    """st.metric delta text vs a target line; None hides the delta entirely
+    rather than fabricating a shortfall from a missing metric."""
+    if value is None:
+        return None
+    return f"목표 {target} 대비 {value - target:+.4f}"
+
+
 def grades_to_chart_rows(grades: list[dict]) -> list[dict]:
     """Rows for the grade bar chart, dropping grades whose observed_bad_rate
     is null (OOT-unobserved — 2.3 deferred note) so altair doesn't choke."""
@@ -102,26 +119,24 @@ def screen_performance() -> None:
     cm, hm = champ["metrics"], chall["metrics"]
 
     c1, c2, c3 = st.columns(3)
-    c1.metric(
-        "챔피언 AUC (OOT)", f"{cm.get('auc_oot', float('nan')):.4f}"
-    )
+    c1.metric("챔피언 AUC (OOT)", fmt_metric(cm.get("auc_oot")))
     c2.metric(
         "챔피언 KS (OOT)",
-        f"{cm.get('ks_oot', float('nan')):.4f}",
-        delta=f"목표 {KS_TARGET} 대비 {cm.get('ks_oot', 0) - KS_TARGET:+.4f}",
+        fmt_metric(cm.get("ks_oot")),
+        delta=target_delta(cm.get("ks_oot"), KS_TARGET),
         delta_color="normal",
     )
-    c3.metric("챔피언 점수 PSI", f"{cm.get('psi_score', float('nan')):.4f}")
+    c3.metric("챔피언 점수 PSI", fmt_metric(cm.get("psi_score")))
 
     c4, c5, c6 = st.columns(3)
     c4.metric(
         "챌린저 AUC (OOT)",
-        f"{hm.get('auc_oot', float('nan')):.4f}",
-        delta=f"목표 {AUC_TARGET} 대비 {hm.get('auc_oot', 0) - AUC_TARGET:+.4f}",
+        fmt_metric(hm.get("auc_oot")),
+        delta=target_delta(hm.get("auc_oot"), AUC_TARGET),
         delta_color="normal",
     )
-    c5.metric("챌린저 KS (OOT)", f"{hm.get('ks_oot', float('nan')):.4f}")
-    c6.metric("챌린저 점수 PSI", f"{hm.get('psi_score', float('nan')):.4f}")
+    c5.metric("챌린저 KS (OOT)", fmt_metric(hm.get("ks_oot")))
+    c6.metric("챌린저 점수 PSI", fmt_metric(hm.get("psi_score")))
 
     st.info(
         "OOT 목표(챔피언 KS≥0.25, 챌린저 AUC≥0.70)에 일부 미달합니다. 이는 신청 시점에 "
@@ -180,11 +195,14 @@ def screen_grades() -> None:
         "등급 경계는 우측폐구간 `(score_min, score_max]` 관례입니다 — `score_min`은 배타적, "
         "`score_max`는 포함(API_SPEC §3). 관측 부도율이 null인 등급(OOT 무관측)은 차트에서 제외됩니다."
     )
-    st.dataframe(
-        pd.DataFrame(data["grades"])[["grade", "score_min", "score_max", "observed_bad_rate"]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    if data["grades"]:
+        # Guarded like the chart above: an empty list gives a zero-column
+        # DataFrame where the column selection raises KeyError (code review).
+        st.dataframe(
+            pd.DataFrame(data["grades"])[["grade", "score_min", "score_max", "observed_bad_rate"]],
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -249,7 +267,15 @@ def screen_cutoff() -> None:
             .encode(
                 x=alt.X("cutoff:Q", title="Cutoff 점수"),
                 y=alt.Y("값:Q", axis=alt.Axis(format="%")),
-                color=alt.Color("지표:N", scale=alt.Scale(range=[ACCENT, "#dc2626"])),
+                # domain pinned: with range alone Vega-Lite assigns colors by
+                # SORTED category order, not declaration order (code review) -
+                # keep the mapping explicit so approval=blue, bad=red always.
+                color=alt.Color(
+                    "지표:N",
+                    scale=alt.Scale(
+                        domain=["approval_rate", "bad_rate"], range=[ACCENT, "#dc2626"]
+                    ),
+                ),
             )
             .properties(height=280)
         )
@@ -268,11 +294,14 @@ def screen_cutoff() -> None:
     )
     profit = _profit_cutoff(model, avg_loan_amnt)
     p1, p2, p3 = st.columns(3)
+    delta_pp = profit.get("delta", {}).get("approval_rate_pp")
     p1.metric("현재 cutoff", f"{profit.get('current_cutoff')}")
     p2.metric(
         "손익 최적 cutoff",
         f"{profit.get('optimal_cutoff')}",
-        delta=f"{profit.get('delta', {}).get('approval_rate_pp')} pp 승인율",
+        # ProfitDelta fields are nullable (2.4 contract); None must hide the
+        # delta, not print a literal "None pp" (code review finding).
+        delta=None if delta_pp is None else f"{delta_pp} pp 승인율",
     )
     p3.metric(
         "연간 기대손익 개선",
@@ -295,17 +324,28 @@ def screen_cutoff() -> None:
             )
             .properties(height=280)
         )
-        lines = pd.DataFrame(
-            [
+        # Null-filtered like the curve itself, and color domain pinned so
+        # "현재"=gray / "최적"=green regardless of category sort order (code
+        # review findings - a swapped or silently-vanishing marker misleads
+        # on a decision-support chart).
+        line_rows = [
+            r
+            for r in (
                 {"c": profit.get("current_cutoff"), "label": "현재"},
                 {"c": profit.get("optimal_cutoff"), "label": "최적"},
-            ]
-        )
-        rule = alt.Chart(lines).mark_rule(strokeDash=[4, 4]).encode(
-            x="c:Q",
-            color=alt.Color("label:N", scale=alt.Scale(range=["gray", "#16a34a"])),
-        )
-        st.altair_chart(pchart + rule, use_container_width=True)
+            )
+            if r["c"] is not None
+        ]
+        if line_rows:
+            rule = alt.Chart(pd.DataFrame(line_rows)).mark_rule(strokeDash=[4, 4]).encode(
+                x="c:Q",
+                color=alt.Color(
+                    "label:N",
+                    scale=alt.Scale(domain=["현재", "최적"], range=["gray", "#16a34a"]),
+                ),
+            )
+            pchart = pchart + rule
+        st.altair_chart(pchart, use_container_width=True)
 
     st.markdown("**가정 (assumptions)**")
     for a in profit.get("assumptions", []):

@@ -19,6 +19,12 @@
 - **등급표에서 OOT 관측 0건인 등급이 monotonic 검증에서 조용히 제외** [app/loader.py:_grade_table, scorecard/grading.py:validate_monotonic] — `observed_bad_rate=None` 행이 dropna로 빠지면서 그 등급의 데이터 공백이 monotonic_validated=true에 반영 안 됨. `grading.py` 변경(빈 등급 명시 플래그)이 필요해 서빙 스토리 범위 밖.
 - **`/v1/score`가 `SingleScoreResponse`/`BothScoreResponse` 두 타입을 반환하는데 명시 response_model 없음** [app/main.py] — 쿼리파라미터(`model=both`)에 따라 셰이프가 달라지는 의도된 패턴이라 FastAPI의 단일 response_model로 표현 불가. OpenAPI 문서화 개선(oneOf 등)은 대시보드(2.5) 연동 시 필요성 재평가.
 
+## Deferred from: code review (story-2-5) (2026-07-16)
+
+- **슬라이더 드래그 틱마다 blocking POST(10s 타임아웃)** [dashboard/app.py:screen_cutoff] — Streamlit rerun 특성상 슬라이더 값 변경마다 `/v1/simulate/cutoff` POST가 순차 발화. 현재는 로컬 API+startup 사전계산 조회(ms 단위)라 체감 지연 없음. 원격 API로 전환하거나 응답이 느려지면 debounce(st.form 또는 on_change 지연) 검토.
+- **health 게이트와 60s TTL 캐시의 정합 창** [dashboard/app.py] — API가 새 모델로 재시작해도 최대 60초간 구모델 메트릭이 캐시에서 서빙될 수 있음(역방향: degraded 전환 감지는 매 rerun health로 즉시). 로컬 단일 사용자 데모에서 수용. 필요 시 health의 model_version을 캐시 키에 포함.
+- **`CURRENT_CUTOFF=546.0` 대시보드 중복 상수** [dashboard/app.py] — 슬라이더 초기값 시드로만 사용(표시 수치는 전부 API의 current_cutoff). 서버 상수와 드리프트 가능성 있으나 UI 시드 특성상 영향 미미. profit 응답의 current_cutoff로 슬라이더를 시드하려면 위젯 생성 순서 재구성이 필요해 보류.
+
 ## Deferred from: code review (story-2-4) (2026-07-16)
 
 - **degenerate profit curve 시 앱이 startup에서 크래시** [app/loader.py, scorecard/profit.py:find_optimal_cutoff] — 리뷰 patch로 `load_profit_frame`(조인 미매치·팬아웃)과 `find_optimal_cutoff`(전 cutoff 승인 0건)가 fail-fast ValueError를 던지게 되면서, startup 사전계산 경로에서 이 예외가 발생하면 uvicorn 자체가 뜨지 못함(503 MODEL_NOT_LOADED로 우아하게 강등되지 않음). 현재 실데이터에서는 발생 불가(100% 매치·정상 curve 실측)이고, "잘못된 아티팩트로는 서빙을 시작하지 않는다"는 관점에서 크래시가 오히려 안전한 기본값이라 수용. 부분 강등(profit 엔드포인트만 503, 나머지 서빙 유지)이 필요해지면 loader의 사전계산을 try/except로 감싸 `profit_base_curves`를 비우는 방식 검토 — 대시보드(2.5)가 가용성 요구를 명확히 할 때 재평가.
