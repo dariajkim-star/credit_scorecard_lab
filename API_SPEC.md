@@ -170,6 +170,8 @@ cutoff 시뮬레이션 — 검증 표본(서버 내장) 기준.
 
 가상 하드룰셋을 검증 표본에 적용해 룰별 배제 효과를 진단.
 
+- `?model=champion|challenger`(기본 champion) — verdict의 모형 중복도 신호가 모델별 점수 분포에 의존하므로 모델 선택 (v0.3, Story 3.1: `/v1` 내 하위호환 추가).
+
 ### 응답
 ```json
 {
@@ -181,16 +183,19 @@ cutoff 시뮬레이션 — 검증 표본(서버 내장) 기준.
       "verdict": "유지 권장 — 배제집단 부도율이 모집단 대비 1.75배"
     },
     {
-      "rule_id": "SCORE_REDUNDANT_INQ", "description": "최근 6개월 조회 2건↑ 거절",
+      "rule_id": "DELINQ_GE_1", "description": "최근 2년 연체 이력 1건 이상 거절",
       "excluded_count": 640, "excluded_bad_rate": 0.058, "population_bad_rate": 0.052,
       "opportunity_loss_est": 4300000,
-      "verdict": "재검토 권장 — 모형 점수와 판별력 중복, 배제 효과 미미"
+      "verdict": "재검토 권장 — 배제집단의 85%가 이미 모형 컷오프 미만(점수와 판별력 중복, 룰의 한계 기여 미미)"
     }
-  ]
+  ],
+  "assumptions": ["하드룰셋은 실무 관행에 근거해 설계한 가상 룰이며 실제 운영 정책이 아니다", "..."]
 }
 ```
 
-- `verdict`는 배제집단 부도율/모집단 부도율 비율 + 모형 점수와의 중복도(상관)로 규칙 기반 산출 (LLM 생성 아님 — P3의 "결정은 룰과 모형" 원칙과 일관)
+- `verdict`는 배제집단 부도율/모집단 부도율 비율 + 모형 점수와의 중복도(배제집단 중 `score < current_cutoff` 비율)로 규칙 기반 산출 (LLM 생성 아님 — P3의 "결정은 룰과 모형" 원칙과 일관)
+- `excluded_bad_rate`는 배제 0건인 룰에서 `null`(미정의 — 0.0 아님, 손익 엔드포인트 nullable 관례와 동일).
+- `assumptions`(v0.3, Story 3.1): 가상 룰셋·표본 가정·기회손실 정의를 항상 명시 (손익 엔드포인트 §7의 `assumptions`와 동일한 컨설팅 정직성 원칙, 하위호환 추가).
 
 ## 9. 버저닝·P3 연동 계약
 

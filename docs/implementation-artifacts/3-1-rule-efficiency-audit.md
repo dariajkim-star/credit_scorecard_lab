@@ -4,7 +4,7 @@ baseline_commit: 300d6e3
 
 # Story 3.1: 룰 효율성 진단 (컨설턴트 킥②)
 
-Status: review
+Status: done
 
 ## Story
 
@@ -59,6 +59,20 @@ so that "유지/재검토" 근거를 가진 룰 정비 제안을 할 수 있다.
   - [x] `tests/test_app.py`에 `/v1/rules/efficiency` 엔드포인트 테스트 추가 — §8 스키마 준수, model 쿼리, NaN→null.
   - [x] `pytest -q` 전체 통과(기존 189 + 신규).
   - [x] 실데이터 조인 실행 + 라이브 uvicorn으로 `/v1/rules/efficiency` 실제 HTTP 호출 실증(챔피언·챌린저 양쪽, verdict가 상식적인지 — 예: DTI 룰이 실제로 배제집단 부도율을 높이는지).
+
+### Review Findings (2026-07-16, 3-레이어 리뷰: Blind/Edge/Auditor)
+
+- [x] [Review][Patch] valid model인데 대상 rows 없음 → `rule_efficiency`의 ValueError가 500으로 새어 §0 에러계약 위반. 엔드포인트에서 잡아 적절 처리(현재 실데이터엔 두 모델·2015 다 있으나 방어) [app/main.py] (blind, Med)
+- [x] [Review][Patch] `STORE.rule_frame`가 None일 때 subscript 500 — startup try/except가 loaded=False로 degrade시키므로 정상경로는 안전하나, 방어적 명시 가드 추가 [app/main.py] (blind, Med)
+- [x] [Review][Patch] unmatched-join 검사가 join 키(`id`)가 아닌 RULE_INPUT_COLUMNS 전체 NaN을 봄 — 매치됐지만 전 컬럼 결측인 행을 오탐(startup 크래시)하거나 미탐 가능. `merged["id"].isna()`로 교체(정확한 신호) [scorecard/rule_efficiency.py:load_rule_frame] (blind+edge, Med)
+- [x] [Review][Patch] `population_bad_rate==0`이면 verdict가 "nan배" 리터럴 출력 — 실데이터 미발생이나 저비용 가드(다른 문구로) [scorecard/rule_efficiency.py:_verdict] (blind+edge+auditor, Low)
+- [x] [Review][Patch] API_SPEC §8을 실제 응답에 맞춰 갱신 — 추가된 `assumptions` 필드·`?model=` 쿼리를 §8에 명시(AD-5 스펙 정합, 지금은 문서화된 확장이지만 스펙 본문 미반영) [API_SPEC.md] (auditor, Low)
+- [x] [Review][Patch] model_overlap 재검토 분기가 강한 keep 신호(고배수)를 무조건 덮는다는 설계 의도를 주석으로 명시(현재 미문서) [scorecard/rule_efficiency.py:_verdict] (blind, Low)
+- [x] [Review][Defer] `opportunity_loss_est`가 양수 실현손익만 합산 → 순 포트폴리오 수치와 tie-out 안 됨. Task 3에서 "놓친 이익" 정의로 의도한 결정(리포트 명시), 순액 지표가 필요해지면 별도 필드 [scorecard/rule_efficiency.py:_opportunity_loss] — deferred
+- [x] [Review][Defer] vintage/model_type dtype mismatch 시 조용히 빈 population→500 — strategy.py 등 기존 소비자와 동일 관례(fail-fast), AD-3 프레임 스키마가 dtype 보장. 프레임 생성(1.7b) 소관 [scorecard/rule_efficiency.py] — deferred
+- [x] [Review][Defer] raw `id` 중복 시 `validate="many_to_one"`가 startup 전체 차단(MergeError) — profit.load_profit_frame과 동일 계약, 데이터 품질 문제를 전체 장애로 전환하나 fail-fast가 의도. 부분 강등 필요 시 재평가(2.4 startup-crash defer와 동류) — deferred
+
+dismiss: overlap 방향(score<cutoff=거절)은 1.7b `generalized_score`가 "높은 점수=안전"으로 확정한 계약이라 반전 위험 없음(파이프라인 전체 관례); `nan`/enum 관련 일부는 Edge가 이미 가드 확인.
 
 ## Dev Notes
 
@@ -158,5 +172,6 @@ claude-opus-4-8 (bmad-dev-story)
 
 ## Change Log
 
+- 2026-07-16: 3-레이어 코드리뷰(Blind/Edge/Auditor) — patch 6건 반영(no-rows/None rule_frame 방어, unmatched-join을 id 키 기준으로 수정, nan배 verdict 가드, model_overlap 우선순위 주석, API_SPEC §8에 assumptions·model 쿼리 반영), defer 3건, dismiss 일부(overlap 방향은 generalized_score 계약). 회귀 테스트 2건, pytest 203 passed, 라이브 재실증. Auditor 차단 위반 0건. Status → done.
 - 2026-07-16: Story 3.1 구현 — scorecard/rule_efficiency.py + GET /v1/rules/efficiency. 실데이터 결과 세 룰 모두 재검토 권장(DTI·INQ 모형 중복 85~94%, DELINQ 판별력 1.07배·기회손실 최대). 리포트 작성(한계 명시). 라이브 uvicorn 실증(챔피언·챌린저). pytest 201 passed(+12). Status → review.
 - 2026-07-16: Story 3.1 생성 — 핵심 데이터 갭(룰 입력 변수 dti/delinq/inq + loan_amnt가 프레임에 없음) 실측 발견·해소 방안(2.4 조인 패턴 재사용, AD-3 비위반) 결정, 가상 룰셋 3+개 후보·기회손실 정의·verdict 규칙(배수+모형 중복도) 오픈퀘스천 명시, GET /v1/rules/efficiency에 model 쿼리 추가 근거 기록, profit.realized_profit 재사용 지도 작성.

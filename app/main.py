@@ -387,6 +387,13 @@ def rules_efficiency(
     model: schemas.ModelChoiceSingle = Query("champion"),
 ) -> schemas.RuleEfficiencyResponse:
     _require_loaded()
+    if STORE.rule_frame is None:
+        # _require_loaded() guarantees "loaded", not "rule_frame present" - the
+        # raw-parquet join could in principle be absent on an alternate load
+        # path. Surface it as the documented 503 rather than a NoneType 500
+        # (code review finding). A no-rows ValueError for an otherwise valid
+        # model still flows to the §0-shaped global handler as INTERNAL_ERROR.
+        raise ApiError(503, "rule-audit frame not loaded", "MODEL_NOT_LOADED")
     # model query is an ADDITION to API_SPEC §8 (AD-5-compliant): the model-
     # overlap signal in each verdict compares against that model's score, and
     # champion/challenger sit on different score distributions.

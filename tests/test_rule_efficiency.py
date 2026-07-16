@@ -115,6 +115,32 @@ def test_load_rule_frame_fails_fast_on_unmatched(tmp_path):
         re.load_rule_frame(frame, raw)
 
 
+def test_load_rule_frame_allows_matched_row_with_null_inputs(tmp_path):
+    # A genuinely matched applicant whose rule inputs are all NULL must NOT be
+    # flagged as unmatched (the guard checks the join key, not the inputs).
+    frame = pd.DataFrame({
+        "applicant_id": ["A"], "vintage": [2015], "model_type": ["champion"],
+        "score": [500.0], "bad_flag": [0], "int_rate": [12.0],
+        "recoveries": [0.0], "total_pymnt": [11000.0],
+    })
+    raw = tmp_path / "raw.parquet"
+    pd.DataFrame({
+        "id": ["A"], "dti": [np.nan], "delinq_2yrs": [np.nan],
+        "inq_last_6mths": [np.nan], "loan_amnt": [np.nan],
+    }).to_parquet(raw)
+    out = re.load_rule_frame(frame, raw)  # must not raise
+    assert len(out) == 1
+
+
+def test_verdict_zero_population_bad_rate_is_not_nan_string():
+    # Degenerate population (no defaults): verdict must not format "nan배".
+    rows = [{"dti": 50.0, "bad_flag": 0, "score": 600.0} for _ in range(5)]
+    out = re.rule_efficiency(_pop(rows), "champion", current_cutoff=546.0)
+    dti = next(r for r in out if r["rule_id"] == "DTI_GT_40")
+    assert "nan" not in dti["verdict"]
+    assert "진단 불가" in dti["verdict"]
+
+
 # --- real-data end-to-end sanity (gated) ------------------------------------
 
 ARTIFACTS_PRESENT = ACCEPTED_PARQUET.exists()

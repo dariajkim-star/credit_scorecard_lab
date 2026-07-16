@@ -81,9 +81,11 @@ def load_rule_frame(frame: pd.DataFrame, raw_parquet_path: str | Path) -> pd.Dat
     merged = frame.merge(
         raw, left_on="applicant_id", right_on="id", how="left", validate="many_to_one"
     )
-    # all-NaN across every rule input for a row means the join found no raw
-    # match (real missing values are per-column, not whole-row); flag it.
-    unmatched = merged[RULE_INPUT_COLUMNS].isna().all(axis=1).sum()
+    # Check the JOIN KEY itself (id becomes NaN only for a failed left-join
+    # match), not the rule-input columns: a genuinely matched applicant whose
+    # dti/loan_amnt/etc. are all legitimately NULL would trip a whole-row-NaN
+    # check as a false "diverged" and take down startup (code review finding).
+    unmatched = int(merged["id"].isna().sum())
     if unmatched:
         raise ValueError(
             f"{unmatched} applicant_id(s) did not match any row in the raw parquet "
@@ -118,12 +120,21 @@ def _verdict(
     """Deterministic keep/review verdict with its rationale (AD-7, NFR7)."""
     if excluded_count == 0:
         return "진단 불가 — 이 표본에서 이 룰이 배제하는 신청 건이 없음"
-    multiple = excluded_bad_rate / population_bad_rate if population_bad_rate else float("nan")
+    # Model overlap is checked FIRST and deliberately overrides a strong
+    # discrimination signal: if the model score already rejects most of the
+    # excluded group, the rule is redundant regardless of how risky that group
+    # is - the score is doing the work, so the rule earns "review" (code
+    # review: this precedence is intentional, documented here).
     if model_overlap is not None and model_overlap >= MODEL_OVERLAP_REVIEW:
         return (
             f"재검토 권장 — 배제집단의 {model_overlap:.0%}가 이미 모형 컷오프 미만"
             "(점수와 판별력 중복, 룰의 한계 기여 미미)"
         )
+    if not population_bad_rate:
+        # Degenerate (zero population bad rate): the multiple is undefined, so
+        # don't format a literal "nan배" into a human-facing verdict.
+        return "진단 불가 — 모집단 부도율이 0이라 판별력 배수를 정의할 수 없음"
+    multiple = excluded_bad_rate / population_bad_rate
     if multiple >= BAD_RATE_MULTIPLE_KEEP:
         return f"유지 권장 — 배제집단 부도율이 모집단 대비 {multiple:.2f}배"
     return f"재검토 권장 — 배제집단 부도율이 모집단 대비 {multiple:.2f}배로 판별력이 낮음"

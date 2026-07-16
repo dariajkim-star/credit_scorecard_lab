@@ -19,6 +19,12 @@
 - **등급표에서 OOT 관측 0건인 등급이 monotonic 검증에서 조용히 제외** [app/loader.py:_grade_table, scorecard/grading.py:validate_monotonic] — `observed_bad_rate=None` 행이 dropna로 빠지면서 그 등급의 데이터 공백이 monotonic_validated=true에 반영 안 됨. `grading.py` 변경(빈 등급 명시 플래그)이 필요해 서빙 스토리 범위 밖.
 - **`/v1/score`가 `SingleScoreResponse`/`BothScoreResponse` 두 타입을 반환하는데 명시 response_model 없음** [app/main.py] — 쿼리파라미터(`model=both`)에 따라 셰이프가 달라지는 의도된 패턴이라 FastAPI의 단일 response_model로 표현 불가. OpenAPI 문서화 개선(oneOf 등)은 대시보드(2.5) 연동 시 필요성 재평가.
 
+## Deferred from: code review (story-3-1) (2026-07-16)
+
+- **`opportunity_loss_est`가 양수 실현손익만 합산 → 순 포트폴리오 수치와 tie-out 불가** [scorecard/rule_efficiency.py:_opportunity_loss] — Task 3에서 "배제된 우량 대출의 놓친 이익"으로 의도한 정의(리포트에 명시). 순액(양수-음수) 지표나 포트폴리오 대조가 필요해지면 별도 필드로 추가.
+- **vintage/model_type dtype mismatch 시 빈 population→500** [scorecard/rule_efficiency.py] — strategy.py 등 기존 소비자와 동일한 fail-fast 관례. AD-3 프레임 스키마가 dtype를 보장하므로 정상 데이터에선 미발생. 프레임 생성(1.7b) 스키마 검증 강화 소관.
+- **raw `id` 중복 시 many_to_one이 startup 전체 차단** [scorecard/rule_efficiency.py:load_rule_frame] — profit.load_profit_frame과 동일 계약. 데이터 품질 문제를 부분 강등(rule 엔드포인트만 503) 없이 전체 장애로 전환하나 fail-fast가 의도. 2.4 startup-crash defer와 동류 — 대시보드/가용성 요구가 명확해지면 재평가.
+
 ## Deferred from: code review (story-2-5) (2026-07-16)
 
 - **슬라이더 드래그 틱마다 blocking POST(10s 타임아웃)** [dashboard/app.py:screen_cutoff] — Streamlit rerun 특성상 슬라이더 값 변경마다 `/v1/simulate/cutoff` POST가 순차 발화. 현재는 로컬 API+startup 사전계산 조회(ms 단위)라 체감 지연 없음. 원격 API로 전환하거나 응답이 느려지면 debounce(st.form 또는 on_change 지연) 검토.
