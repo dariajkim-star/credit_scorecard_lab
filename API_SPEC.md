@@ -1,4 +1,6 @@
-# credit-scorecard-lab — API 명세서 v0.2
+# credit-scorecard-lab — API 명세서 v0.3
+
+> v0.3 (2026-07-16, Story 2.3): §4 입력 스키마를 FR-5 변수선정 확정 결과(7필드)로 교체(§4의 기존 12필드는 확정 전 예상 후보였음 — AD-5 스펙 선수정). reason_codes는 실제 불리 요인만 반환(0점 요인 미포함 — 3개 미만 가능, Story 2.2 결정). §6 응답에 `bad_rate_rejected` 명시.
 
 > 스코어링 서빙 API. 판정(승인/거절)은 이 API의 책임이 아님 — 점수·PD·등급·사유를 반환하고, cutoff 적용은 소비자(대시보드·P3 에이전트)의 몫.
 > Base URL: `http://localhost:8000` · 모든 업무 엔드포인트는 `/v1` prefix.
@@ -69,26 +71,21 @@
 
 ### 요청
 
-입력 필드는 **IV 변수선정(FR-5) 결과로 최종 확정**되며 pydantic 스키마로 버저닝. 아래는 Lending Club 기준 예상 후보(신청 시점에 알 수 있는 필드만 — 기준시점 원칙):
+입력 필드는 IV 변수선정(FR-5, Story 1.4) 결과로 **7개 필드로 확정** (manifest `feature_order`와 동일 — 신청 시점에 알 수 있는 필드만, 기준시점 원칙):
 
 ```json
 {
-  "loan_amnt": 12000,
-  "term_months": 36,
+  "fico_range_low": 690,
   "annual_inc": 65000,
   "dti": 18.5,
-  "emp_length_years": 4,
   "home_ownership": "MORTGAGE",
-  "purpose": "debt_consolidation",
-  "fico_range_low": 690,
   "revol_util": 42.3,
-  "delinq_2yrs": 0,
   "inq_last_6mths": 1,
-  "open_acc": 8
+  "purpose": "debt_consolidation"
 }
 ```
 
-- 결측 허용 필드는 `null` 가능 (WOE 별도 빈으로 처리) — 스키마에 필드별 명시
+- 모든 필드 `null` 허용 (WOE Missing 빈으로 처리, Story 1.4 metric_missing 계약) — 단 전 필드 null 요청은 422
 - `model` 쿼리 파라미터: `champion`(기본) | `challenger` | `both`
 
 ### 응답 (200)

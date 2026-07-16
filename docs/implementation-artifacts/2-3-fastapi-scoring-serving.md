@@ -1,6 +1,10 @@
+---
+baseline_commit: 3529544
+---
+
 # Story 2.3: FastAPI 스코어링 서빙
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -24,37 +28,37 @@ so that 판정 로직 없이 스코어링 결과를 소비할 수 있다.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: `app/loader.py` — 아티팩트 로딩 계층 (AC: #3, AD-4)
-  - [ ] 시작 시 1회 로드: `champion_model.joblib`({"model","binners"}), `challenger_model.joblib`({"model","calibrator"}), 두 manifest(JSON), `data/scored_validation_frame.parquet`
-  - [ ] **bundle 필수 키 명시 검증**(2.2 defer 인수인계 — 어느 파일의 어떤 키가 없는지 말하는 명확한 에러). manifest의 `feature_order`·`grade_thresholds`·`pdo`/`base_score`/`base_odds` 존재 검증
-  - [ ] 파일 부재/검증 실패 시 앱은 뜨되 `model_loaded=False` 상태 유지(→ /health degraded, 업무 엔드포인트 503) — 크래시하지 않는다(P3가 /health로 가용성 판단)
-  - [ ] 학습·재적합·아티팩트 쓰기 코드 금지(AD-4). `scorecard/` 모듈만 import(AD-9 방향 준수: app→scorecard)
-- [ ] Task 2: `app/schemas.py` — pydantic 요청/응답 스키마 (AC: #1, AD-5)
-  - [ ] 입력 스키마는 **manifest `feature_order` 7개 필드**(fico_range_low, annual_inc, dti, home_ownership, revol_util, inq_last_6mths, purpose) — API_SPEC §4의 12필드 예시는 "IV 변수선정(FR-5) 결과로 최종 확정" 전 예상 후보였고, FR-5 확정 결과가 7개(1.4). **API_SPEC §4에 확정 스키마를 반영(AD-5: 스펙 먼저 수정 후 구현)**
-  - [ ] 결측 허용: 전 필드 `| None`(WOE Missing 빈 처리, 1.4 metric_missing 계약) — 단 전 필드 null이면 의미 없으므로 최소 1개 non-null 검증
-  - [ ] 응답 스키마: score/pd/grade/reason_codes(2.2의 ReasonCode 모델 재사용)/warnings/model 블록. `model=both` 시 champion/challenger/score_gap
-- [ ] Task 3: 조회 3종 — /health, /v1/model/info, /v1/grades (AC: #1)
-  - [ ] `/health`: 미로드 시 `status:"degraded"` + **HTTP 200**(spec 명시 — 503 아님)
-  - [ ] `/v1/model/info`: manifest 메타 + **metrics는 scored validation frame(AD-3)에서 시작 시 1회 계산**(oot 행의 AUC/KS + PSI: valid→oot, `evaluation.compute_metrics`·`population_stability_index` 재사용 — 재계산이 아니라 frame 소비이므로 AD-3 위반 아님, 수치는 1.7a/b 리포트 실측값과 일치해야 함: 챔피언 AUC_oot≈0.643/KS≈0.205, PSI≈0.0017)
-  - [ ] `/v1/grades`: manifest `grade_thresholds` 기반 등급표 + frame에서 등급별 observed_bad_rate 계산, `monotonic_validated`(grading.validate_monotonic)
-- [ ] Task 4: POST /v1/score(핵심) + /v1/score/batch (AC: #1, #2, #4)
-  - [ ] champion: raw→`_normalize` 계열 전처리→`binning.transform_woe`(AD-2)→`champion.score_applicant`→p_bad(`evaluation.champion_p_bad` 경로)→`grading.assign_grade`(champion thresholds)→`reasons.champion_reason_codes`
-  - [ ] challenger: `evaluation.challenger_p_bad`(calibrated)→`evaluation.generalized_score`→challenger thresholds 등급→`reasons.challenger_reason_codes`
-  - [ ] `model` 쿼리 파라미터 champion(기본)|challenger|both. both: `{"champion":{...},"challenger":{...},"score_gap":float}`
-  - [ ] 400 VALUE_OUT_OF_RANGE: 수치 필드가 **학습 관측 범위의 하드 배수 초과**(스토리오너 결정 필요 — 권장: manifest `woe_bin_edges` 최외곽 유한 경계의 ±10배 또는 상식 상한 dti>1000 등, 결정과 근거를 Dev Notes/리포트에 기록). 경계 근처(범위 밖이지만 차단 기준 미만)는 200 + `warnings`
-  - [ ] batch: JSON 배열 최대 1,000건(초과 422), 응답 = 단건 배열 + `grade_distribution` 요약
-  - [ ] 요청별 `model_version` 로깅(AC #5) — logging 표준 모듈, 미들웨어 또는 엔드포인트 공통 의존성
-- [ ] Task 5: POST /v1/simulate/cutoff (AC: #1)
-  - [ ] **`strategy.py` 재사용**(2.1 산출물 — `cutoff_trade_off_curve`·`lookup_cutoff`를 frame에 적용, 재구현 금지). 응답: cutoff_score/approval_rate/bad_rate_approved/bad_rate_rejected/curve
-  - [ ] `bad_rate_rejected`는 strategy.py에 없음 — 거절집단(score<cutoff) 부도율 계산 추가는 **app 계층이 아니라 strategy.py에 추가**(scorecard가 로직 소유, app은 조립만 — AD-9 정신). strategy.py 수정 시 기존 2.1 테스트 불변 확인
-- [ ] Task 6: 에러 계약 + P3 예시 (AC: #4, #6)
-  - [ ] 503 MODEL_NOT_LOADED(전 업무 엔드포인트, 로더 미로드 시), 400 VALUE_OUT_OF_RANGE, 422(FastAPI 기본 — 단 `error_code` 필드 추가 여부는 spec이 "FastAPI 기본"이라 하므로 기본 형태 유지 허용, `detail`+`error_code` 포맷은 400/503에 적용)
-  - [ ] `docs/implementation-artifacts/p3-examples-2-3.md`(또는 json) — /health→/v1/score?model=champion→/v1/grades 순 실제 요청/응답 페어(§9 P3 소비 순서)
-- [ ] Task 7: pytest + 성능 + 라이브 실증 (AC: #2, 전체)
-  - [ ] `tests/test_app.py` — 6개 엔드포인트 정상 경로, 에러 3종, model=both, batch 상한, 결측 필드 스코어링, grade 정합(등급표와 단건 응답 등급 일치)
-  - [ ] p95 계측: TestClient로 /v1/score 워밍업 후 ≥20회, p95<300ms assert(수치는 리포트 기록)
-  - [ ] 라이브 uvicorn 기동 → 실제 HTTP로 6개 엔드포인트 호출 실증(응답을 P3 예시 문서에 사용)
-  - [ ] `pytest -q` 전체 통과(기존 128 + 신규)
+- [x] Task 1: `app/loader.py` — 아티팩트 로딩 계층 (AC: #3, AD-4)
+  - [x] 시작 시 1회 로드: `champion_model.joblib`({"model","binners"}), `challenger_model.joblib`({"model","calibrator"}), 두 manifest(JSON), `data/scored_validation_frame.parquet`
+  - [x] **bundle 필수 키 명시 검증**(2.2 defer 인수인계 — 어느 파일의 어떤 키가 없는지 말하는 명확한 에러). manifest의 `feature_order`·`grade_thresholds`·`pdo`/`base_score`/`base_odds` 존재 검증
+  - [x] 파일 부재/검증 실패 시 앱은 뜨되 `model_loaded=False` 상태 유지(→ /health degraded, 업무 엔드포인트 503) — 크래시하지 않는다(P3가 /health로 가용성 판단)
+  - [x] 학습·재적합·아티팩트 쓰기 코드 금지(AD-4). `scorecard/` 모듈만 import(AD-9 방향 준수: app→scorecard)
+- [x] Task 2: `app/schemas.py` — pydantic 요청/응답 스키마 (AC: #1, AD-5)
+  - [x] 입력 스키마는 **manifest `feature_order` 7개 필드**(fico_range_low, annual_inc, dti, home_ownership, revol_util, inq_last_6mths, purpose) — API_SPEC §4의 12필드 예시는 "IV 변수선정(FR-5) 결과로 최종 확정" 전 예상 후보였고, FR-5 확정 결과가 7개(1.4). **API_SPEC §4에 확정 스키마를 반영(AD-5: 스펙 먼저 수정 후 구현)**
+  - [x] 결측 허용: 전 필드 `| None`(WOE Missing 빈 처리, 1.4 metric_missing 계약) — 단 전 필드 null이면 의미 없으므로 최소 1개 non-null 검증
+  - [x] 응답 스키마: score/pd/grade/reason_codes(2.2의 ReasonCode 모델 재사용)/warnings/model 블록. `model=both` 시 champion/challenger/score_gap
+- [x] Task 3: 조회 3종 — /health, /v1/model/info, /v1/grades (AC: #1)
+  - [x] `/health`: 미로드 시 `status:"degraded"` + **HTTP 200**(spec 명시 — 503 아님)
+  - [x] `/v1/model/info`: manifest 메타 + **metrics는 scored validation frame(AD-3)에서 시작 시 1회 계산**(oot 행의 AUC/KS + PSI: valid→oot, `evaluation.compute_metrics`·`population_stability_index` 재사용 — 재계산이 아니라 frame 소비이므로 AD-3 위반 아님, 수치는 1.7a/b 리포트 실측값과 일치해야 함: 챔피언 AUC_oot≈0.643/KS≈0.205, PSI≈0.0017)
+  - [x] `/v1/grades`: manifest `grade_thresholds` 기반 등급표 + frame에서 등급별 observed_bad_rate 계산, `monotonic_validated`(grading.validate_monotonic)
+- [x] Task 4: POST /v1/score(핵심) + /v1/score/batch (AC: #1, #2, #4)
+  - [x] champion: raw→`_normalize` 계열 전처리→`binning.transform_woe`(AD-2)→`champion.score_applicant`→p_bad(`evaluation.champion_p_bad` 경로)→`grading.assign_grade`(champion thresholds)→`reasons.champion_reason_codes`
+  - [x] challenger: `evaluation.challenger_p_bad`(calibrated)→`evaluation.generalized_score`→challenger thresholds 등급→`reasons.challenger_reason_codes`
+  - [x] `model` 쿼리 파라미터 champion(기본)|challenger|both. both: `{"champion":{...},"challenger":{...},"score_gap":float}`
+  - [x] 400 VALUE_OUT_OF_RANGE: 수치 필드가 **학습 관측 범위의 하드 배수 초과**(스토리오너 결정 필요 — 권장: manifest `woe_bin_edges` 최외곽 유한 경계의 ±10배 또는 상식 상한 dti>1000 등, 결정과 근거를 Dev Notes/리포트에 기록). 경계 근처(범위 밖이지만 차단 기준 미만)는 200 + `warnings`
+  - [x] batch: JSON 배열 최대 1,000건(초과 422), 응답 = 단건 배열 + `grade_distribution` 요약
+  - [x] 요청별 `model_version` 로깅(AC #5) — logging 표준 모듈, 미들웨어 또는 엔드포인트 공통 의존성
+- [x] Task 5: POST /v1/simulate/cutoff (AC: #1)
+  - [x] **`strategy.py` 재사용**(2.1 산출물 — `cutoff_trade_off_curve`·`lookup_cutoff`를 frame에 적용, 재구현 금지). 응답: cutoff_score/approval_rate/bad_rate_approved/bad_rate_rejected/curve
+  - [x] `bad_rate_rejected`는 strategy.py에 없음 — 거절집단(score<cutoff) 부도율 계산 추가는 **app 계층이 아니라 strategy.py에 추가**(scorecard가 로직 소유, app은 조립만 — AD-9 정신). strategy.py 수정 시 기존 2.1 테스트 불변 확인
+- [x] Task 6: 에러 계약 + P3 예시 (AC: #4, #6)
+  - [x] 503 MODEL_NOT_LOADED(전 업무 엔드포인트, 로더 미로드 시), 400 VALUE_OUT_OF_RANGE, 422(FastAPI 기본 — 단 `error_code` 필드 추가 여부는 spec이 "FastAPI 기본"이라 하므로 기본 형태 유지 허용, `detail`+`error_code` 포맷은 400/503에 적용)
+  - [x] `docs/implementation-artifacts/p3-examples-2-3.md`(또는 json) — /health→/v1/score?model=champion→/v1/grades 순 실제 요청/응답 페어(§9 P3 소비 순서)
+- [x] Task 7: pytest + 성능 + 라이브 실증 (AC: #2, 전체)
+  - [x] `tests/test_app.py` — 6개 엔드포인트 정상 경로, 에러 3종, model=both, batch 상한, 결측 필드 스코어링, grade 정합(등급표와 단건 응답 등급 일치)
+  - [x] p95 계측: TestClient로 /v1/score 워밍업 후 ≥20회, p95<300ms assert(수치는 리포트 기록)
+  - [x] 라이브 uvicorn 기동 → 실제 HTTP로 6개 엔드포인트 호출 실증(응답을 P3 예시 문서에 사용)
+  - [x] `pytest -q` 전체 통과(기존 128 + 신규)
 
 ## Dev Notes
 
@@ -97,12 +101,36 @@ so that 판정 로직 없이 스코어링 결과를 소비할 수 있다.
 
 ### Agent Model Used
 
+claude-fable-5 (bmad-dev-story, /loop 자율 진행)
+
 ### Debug Log References
+
+- **등급표 경계 버그를 정합성 테스트가 즉시 잡음**: `grade_thresholds`(11개)를 내부 임계로 해석해 12개 유령 등급 생성 → `test_grades_table_consistent_with_scoring`(등급표 vs 단건 스코어 등급 대조)이 첫 실행에서 실패(542.8점이 6등급인데 표의 6등급 하한이 544.8). 실제 의미는 **양끝 포함 bin 경계(len=n_grades+1, 바깥 open-ended)** — `grading._assign_bin`/`_bin_edges_open` 소스 확인 후 grade g = 구간 (edges[n_bins-g], edges[n_bins-g+1]]로 재작성.
+- **AC #5(model_version 로깅)가 라이브 실증에서만 걸림**: TestClient+caplog은 자체 핸들러라 통과처럼 보이지만, uvicorn 하에선 app.* 로거에 핸들러가 없어 INFO가 전부 버려짐 → main.py에서 root 핸들러 부재 시 basicConfig 1회 설정. 라이브 로그로 재실증(scored applicant/cutoff simulation 두 라인).
+- PSI 불일치 원인 확인: 1.7b 리포트는 **train→OOT**(0.0017), 서빙은 frame(valid+oot)만 소비 가능하므로 **valid→OOT**(0.0047) — 다른 비교축이며 둘 다 <0.1. /v1/model/info의 psi_score는 valid→oot로 문서화.
+- p95 실측: **32.9ms**(p50 32.3ms) — SHAP explainer 시작 시 1회 생성(reasons.build_challenger_explainer 신설, challenger_reason_codes에 explainer 주입 파라미터 추가)·curve 101점 시작 시 사전계산 덕분에 NFR2(300ms) 대비 9배 여유.
 
 ### Completion Notes List
 
+- **AD-5 스펙 선수정**: API_SPEC v0.2→v0.3 — §4 입력을 FR-5 확정 7필드로 교체, reason_codes 3개 미만 가능(2.2 결정) 명시, §6에 bad_rate_rejected 추가.
+- **bad_rate_rejected는 strategy.py에 추가**(additive 컬럼, app은 조립만 — 2.1 테스트 12건 불변 통과), 2.2 defer였던 bundle 키 명시 검증은 loader에 구현(champion/challenger 각각 필수 키·manifest 필수 키, 어느 파일의 어떤 키가 없는지 말하는 에러).
+- **VALUE_OUT_OF_RANGE 하드 경계(스토리오너 결정)**: 물리적/상식 한계(FICO 300-850, dti≤999, revol_util≤500, annual_inc≤1e9, inq≤100) — 학습 관측 범위 밖이지만 한계 내면 open-ended 외곽 WOE bin으로 정상 스코어링(+결측 warnings). 근거: 관측범위 기반 차단은 정상적 신규 고객(예: FICO 845)을 오차단.
+- **미로드 degraded 계약**: /health는 200+degraded(spec 명시), 업무 엔드포인트는 503 MODEL_NOT_LOADED — 아티팩트 없이도 도는 always-on 테스트(monkeypatch 빈 store)로 커버.
+- **라이브 실증 완료**: uvicorn:8100 기동, 6개 엔드포인트 실제 HTTP 호출(응답을 p3-examples-2-3.md에 수록), 400/422 에러 계약, model_version 로그 2종 확인.
+- pytest **144 passed**(기존 129 + app 15). /v1/model/info 수치가 1.7a 실측(AUC 0.643/KS 0.2054)과 재현 일치.
+
 ### File List
+
+- `app/loader.py` (NEW — ModelStore, 검증, 시작 시 사전계산: metrics·curves·grade tables·SHAP explainer)
+- `app/schemas.py` (NEW — 7필드 ScoreRequest·응답 스키마·HARD_BOUNDS)
+- `app/main.py` (NEW — 6 엔드포인트, ApiError 핸들러, 로깅)
+- `scorecard/strategy.py` (MODIFIED — bad_rate_rejected additive)
+- `scorecard/reasons.py` (MODIFIED — build_challenger_explainer + explainer 주입 파라미터)
+- `tests/test_app.py` (NEW — 15 tests, p95 계측 포함)
+- `API_SPEC.md` (MODIFIED — v0.3, AD-5 선수정)
+- `docs/implementation-artifacts/p3-examples-2-3.md` (NEW — 라이브 실측 예시)
 
 ## Change Log
 
 - 2026-07-16: Story 2.3 생성 — API_SPEC 6개 엔드포인트, 재사용 지도(Epic1+2.1+2.2 함수 시그니처), 성능 캐싱 전략(SHAP explainer·curve 사전계산), 입력 스키마 7필드 확정(AD-5 스펙 선수정), bad_rate_rejected는 strategy.py에 추가(app은 조립만), 2.2 defer(bundle 키 검증) 인수.
+- 2026-07-16: Story 2.3 구현 — app/{loader,schemas,main}.py 신규, 6개 엔드포인트 전부 라이브 실증, p95=32.9ms(NFR2 9배 여유), 등급표 경계 버그·uvicorn 로깅 공백 2건을 정합성 테스트·라이브 실행이 각각 잡음. 144 passed. Status → review.

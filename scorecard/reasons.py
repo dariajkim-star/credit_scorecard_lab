@@ -202,11 +202,27 @@ def _prepare_challenger_row(applicant_row: pd.Series, variables: list[str]) -> p
     return row
 
 
+def build_challenger_explainer(challenger_bundle: dict):
+    """One reusable tree_path_dependent TreeExplainer for the bundle's model.
+
+    Serving (Story 2.3) calls this once at startup and injects the result
+    into challenger_reason_codes per request - constructing a TreeExplainer
+    per call is wasted work on a hot path (NFR2 p95<300ms). The explainer is
+    stateless across calls, so sharing is safe.
+    """
+    import shap
+
+    return shap.TreeExplainer(
+        challenger_bundle["model"], feature_perturbation="tree_path_dependent"
+    )
+
+
 def challenger_reason_codes(
     challenger_bundle: dict,
     applicant_row: pd.Series,
     variables: list[str],
     top_n: int = 3,
+    explainer=None,
 ) -> list[ChallengerReasonCode]:
     """Top-``top_n`` challenger reason codes by SHAP value (FR11, AD-6).
 
@@ -221,14 +237,12 @@ def challenger_reason_codes(
     Explains the RAW (uncalibrated) LightGBM output, never the calibrator -
     calibration has no per-feature attribution.
     """
-    import shap
-
     if top_n < 1:
         raise ValueError(f"top_n must be >= 1, got {top_n}")
-    model = challenger_bundle["model"]
     row = _prepare_challenger_row(applicant_row, variables)
 
-    explainer = shap.TreeExplainer(model, feature_perturbation="tree_path_dependent")
+    if explainer is None:
+        explainer = build_challenger_explainer(challenger_bundle)
     sv = explainer.shap_values(row)
     if isinstance(sv, list):
         sv = sv[-1]

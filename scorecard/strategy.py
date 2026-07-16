@@ -88,12 +88,17 @@ def cutoff_trade_off_curve(
     for cutoff in cutoffs:
         approved = scores >= cutoff
         approved_count = int(approved.sum())
+        rejected_count = total - approved_count
         approval_rate = approved_count / total if total else np.nan
         bad_rate = float(bad[approved].mean()) if approved_count else np.nan
+        # rejected-side bad rate added for Story 2.3's /v1/simulate/cutoff
+        # (additive column - scorecard owns the calculation, app only serves)
+        bad_rate_rejected = float(bad[~approved].mean()) if rejected_count else np.nan
         rows.append({
             "cutoff": float(cutoff),
             "approval_rate": approval_rate,
             "bad_rate": bad_rate,
+            "bad_rate_rejected": bad_rate_rejected,
             "approved_count": approved_count,
         })
     return pd.DataFrame(rows)
@@ -105,13 +110,16 @@ def lookup_cutoff(
     cutoff: float,
     vintage: int | None = OOT_VINTAGE,
 ) -> dict:
-    """Immediate single-cutoff lookup (FR9): approval_rate, bad_rate, approved_count."""
+    """Immediate single-cutoff lookup (FR9): approval_rate, bad_rate(s), approved_count."""
     curve = cutoff_trade_off_curve(df, model_type, cutoffs=np.array([float(cutoff)]), vintage=vintage)
     row = curve.iloc[0]
     return {
         "cutoff": float(row["cutoff"]),
         "approval_rate": float(row["approval_rate"]) if pd.notna(row["approval_rate"]) else None,
         "bad_rate": float(row["bad_rate"]) if pd.notna(row["bad_rate"]) else None,
+        "bad_rate_rejected": (
+            float(row["bad_rate_rejected"]) if pd.notna(row["bad_rate_rejected"]) else None
+        ),
         "approved_count": int(row["approved_count"]),
     }
 
