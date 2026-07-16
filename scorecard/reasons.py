@@ -165,7 +165,15 @@ def champion_reason_codes(
         # rendered description never reads "-0.0점 하락".
         losses[var] = max(points_lost, 0.0) + 0.0
 
-    ranked = sorted(losses.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+    # Only genuinely adverse factors (points_lost > 0) are reasons a
+    # customer actually lost points on - a variable already sitting at its
+    # safest bin has points_lost == 0 and must never be described as
+    # "불리하여 하락" (code review finding: an applicant with < top_n real
+    # adverse factors was getting padded with misleading "0.0점 하락"
+    # entries). Returns fewer than top_n when fewer than top_n variables
+    # are actually adverse - never pads with non-adverse ones.
+    adverse = [(var, loss) for var, loss in losses.items() if loss > 1e-8]
+    ranked = sorted(adverse, key=lambda kv: kv[1], reverse=True)[:top_n]
     return [
         ChampionReasonCode(
             rank=i + 1,
@@ -238,7 +246,18 @@ def challenger_reason_codes(
         )
 
     shap_by_var = dict(zip(variables, sv))
-    ranked = sorted(shap_by_var.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
+
+    # A negative SHAP value PUSHES TOWARD the good class - it reduced risk,
+    # not increased it. Ranking all variables by value and unconditionally
+    # attaching "위험을 높이는 방향으로 작용했습니다" mislabeled a safe
+    # applicant's risk-reducing factors as risk-increasing ones (code
+    # review finding, reproduced on the real SAFE example in
+    # reason-codes-report-2-2.md: revol_util/purpose/dti all had negative
+    # shap_value yet were described as raising risk). Only genuinely
+    # adverse (positive) contributions qualify as reasons here; returns
+    # fewer than top_n when fewer than top_n variables are adverse.
+    adverse = [(var, float(value)) for var, value in shap_by_var.items() if np.isfinite(value) and value > 1e-8]
+    ranked = sorted(adverse, key=lambda kv: kv[1], reverse=True)[:top_n]
 
     return [
         ChallengerReasonCode(

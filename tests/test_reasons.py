@@ -90,6 +90,16 @@ def challenger_applicant():
     return pd.Series({"fico_range_low": 600.0, "dti": 30.0, "home_ownership": "RENT"})
 
 
+@pytest.fixture
+def challenger_risky_applicant():
+    # extreme values so at least some variables carry genuinely positive
+    # (risk-increasing) SHAP contributions - challenger_applicant above is
+    # too mild for this toy 3-trial model to reliably produce any adverse
+    # factor at all (verified empirically: all 3 shap values come back
+    # negative for it), which would make top_n-count assertions flaky.
+    return pd.Series({"fico_range_low": 300.0, "dti": 60.0, "home_ownership": "RENT"})
+
+
 # --- Pydantic shape (AD-6) --------------------------------------------------
 
 
@@ -152,7 +162,12 @@ def test_champion_reason_codes_best_applicant_has_near_zero_points_lost(champion
     best_result = champion_reason_codes(champion_bundle, best_applicant, CHAMPION_VARS, top_n=2)
     worst_result = champion_reason_codes(champion_bundle, worst_applicant, CHAMPION_VARS, top_n=2)
 
-    assert sum(r.points_lost for r in best_result) < sum(r.points_lost for r in worst_result)
+    # best_applicant sits in the safest bin for every variable, so every
+    # points_lost is filtered out as non-adverse (code review finding: the
+    # original version of this assertion only checked best < worst, which
+    # a 100-vs-101 regression would also satisfy without being "near zero").
+    assert best_result == []
+    assert sum(r.points_lost for r in best_result) == pytest.approx(0.0, abs=1e-4)
     assert sum(r.points_lost for r in worst_result) > 1.0  # meaningfully nonzero
 
 
@@ -183,32 +198,53 @@ def test_champion_reason_codes_default_top_n_is_three():
 # --- challenger_reason_codes (FR11, AD-6) -----------------------------------
 
 
-def test_challenger_reason_codes_returns_top_n_sorted_descending(challenger_bundle, challenger_applicant):
-    result = challenger_reason_codes(challenger_bundle, challenger_applicant, CHALLENGER_VARS, top_n=3)
-    assert len(result) == 3
-    assert [r.rank for r in result] == [1, 2, 3]
+def test_challenger_reason_codes_returns_only_adverse_factors_sorted_descending(
+    challenger_bundle, challenger_risky_applicant
+):
+    """Only genuinely adverse (positive shap_value) factors qualify as
+    reasons - a clearly risky applicant should have at least one, and the
+    returned list is capped at top_n but never padded with non-adverse
+    entries (code review finding)."""
+    result = challenger_reason_codes(challenger_bundle, challenger_risky_applicant, CHALLENGER_VARS, top_n=3)
+    assert 1 <= len(result) <= 3
+    assert [r.rank for r in result] == list(range(1, len(result) + 1))
     shap_values = [r.shap_value for r in result]
     assert shap_values == sorted(shap_values, reverse=True)
+    assert all(v > 0 for v in shap_values)
     assert all(isinstance(r, ChallengerReasonCode) for r in result)
 
 
-def test_challenger_reason_codes_shap_reconstructs_raw_margin(challenger_bundle, challenger_applicant):
-    """Independently verifies expected_value + sum(all shap values) == raw
-    margin (logit of predict_proba) - the identity that guarantees the
-    shap_value field is a genuine SHAP contribution, not an ad-hoc number."""
-    model = challenger_bundle["model"]
+def test_challenger_reason_codes_returns_fewer_than_top_n_when_not_all_adverse(
+    challenger_bundle, challenger_applicant
+):
+    """challenger_applicant has zero genuinely adverse factors for this toy
+    model (verified empirically: all 3 raw shap values are negative) - the
+    function must return an empty list rather than padding with misleading
+    'risk-increasing' descriptions for factors that actually reduced risk."""
+    result = challenger_reason_codes(challenger_bundle, challenger_applicant, CHALLENGER_VARS, top_n=3)
+    assert len(result) == 0
 
-    # ask reasons.py for ALL variables ranked so we can sum every shap_value
-    all_ranked = challenger_reason_codes(
-        challenger_bundle, challenger_applicant, CHALLENGER_VARS, top_n=len(CHALLENGER_VARS)
-    )
-    total_shap = sum(r.shap_value for r in all_ranked)
+
+def test_challenger_reason_codes_shap_reconstructs_raw_margin(challenger_bundle, challenger_applicant):
+    """Independently verifies expected_value + sum(ALL shap values, not just
+    the adverse subset challenger_reason_codes returns) == raw margin
+    (logit of predict_proba) - the identity that guarantees the
+    shap_value field is a genuine SHAP contribution, not an ad-hoc number.
+    Computed directly via shap here (not through challenger_reason_codes,
+    which now filters to positive-only contributions) so this test stays
+    valid regardless of how many factors are adverse for a given applicant."""
+    model = challenger_bundle["model"]
 
     row = challenger_applicant[CHALLENGER_VARS].to_frame().T.copy()
     row["fico_range_low"] = pd.to_numeric(row["fico_range_low"])
     row["dti"] = pd.to_numeric(row["dti"])
     row["home_ownership"] = row["home_ownership"].astype("category")
     explainer = shap.TreeExplainer(model, feature_perturbation="tree_path_dependent")
+    sv = explainer.shap_values(row)
+    if isinstance(sv, list):
+        sv = sv[-1]
+    total_shap = float(np.asarray(sv)[0].sum())
+
     raw_p = model.predict_proba(row)[:, 1][0]
     raw_margin = float(np.log(raw_p / (1 - raw_p)))
     reconstructed = explainer.expected_value + total_shap
@@ -216,20 +252,32 @@ def test_challenger_reason_codes_shap_reconstructs_raw_margin(challenger_bundle,
     assert reconstructed == pytest.approx(raw_margin, abs=1e-2)
 
 
-def test_challenger_reason_codes_handles_string_revol_util(challenger_bundle):
-    """revol_util arrives as a percent string ('29.7') in the raw accepted
-    parquet - challenger_reason_codes must parse it, not crash."""
-    applicant = pd.Series({
-        "fico_range_low": 600.0,
-        "dti": 30.0,
-        "home_ownership": "RENT",
-    })
-    # sanity: function works without revol_util in variables (already covered
-    # above); this test only documents/protects the parsing branch exists
-    # by exercising a variables list without it (guards against accidental
-    # KeyError if the branch assumes the column is always present).
-    result = challenger_reason_codes(challenger_bundle, applicant, CHALLENGER_VARS, top_n=1)
-    assert len(result) == 1
+def test_challenger_reason_codes_parses_percent_string_revol_util():
+    """Directly exercises the revol_util percent-string parsing path on the
+    CHALLENGER side with a synthetic model trained on revol_util - the
+    previous version of this test used a variables list WITHOUT revol_util,
+    so the parsing branch had zero coverage (code review finding, mirrors
+    the equivalent gap fixed on the champion side)."""
+    rng = np.random.default_rng(11)
+    n = 2000
+    fico = pd.array(rng.uniform(300, 850, n), dtype="Float64")
+    revol = pd.array(rng.uniform(0, 100, n), dtype="Float64")
+    logit = -0.02 * (fico.to_numpy(dtype=float) - 575) + 0.05 * (revol.to_numpy(dtype=float) - 50)
+    y = pd.Series((rng.random(n) < 1 / (1 + np.exp(-logit))).astype(int))
+    train_df = pd.DataFrame({"fico_range_low": fico, "revol_util": revol})
+    variables = ["fico_range_low", "revol_util"]
+
+    model = tune_challenger(train_df, y, train_df, y, variables, n_trials=3, seed=11)
+    bundle = {"model": model, "calibrator": None}
+
+    # raw applicant with revol_util as a bare percent STRING and an
+    # extreme high-utilization value, as in the real accepted parquet
+    applicant = pd.Series({"fico_range_low": 640.0, "revol_util": "98.5"})
+    result = challenger_reason_codes(bundle, applicant, variables, top_n=2)
+
+    assert len(result) <= 2
+    assert all(np.isfinite(r.shap_value) for r in result)
+    assert all(r.shap_value > 0 for r in result)
 
 
 def test_challenger_reason_codes_description_is_nonempty_korean_sentence(challenger_bundle, challenger_applicant):
@@ -317,17 +365,21 @@ def test_reason_codes_handle_missing_numeric_value(champion_bundle, challenger_b
     """A NaN in a numeric applicant field is a plausible real input: the
     champion path maps it to the fitted Missing-bin WOE
     (metric_missing="empirical"), the challenger path relies on LightGBM's
-    native NaN routing - both must return top-n codes without raising."""
-    champ_applicant = pd.Series({"fico_range_low": 650.0, "dti": np.nan})
+    native NaN routing - both must return without raising, and (since
+    reason codes now only surface genuinely adverse factors) return no
+    more than top_n items - exact count depends on whether the Missing
+    bin/NaN split happens to be adverse for this applicant, which isn't
+    asserted here."""
+    champ_applicant = pd.Series({"fico_range_low": 300.0, "dti": np.nan})
     champ = champion_reason_codes(champion_bundle, champ_applicant, CHAMPION_VARS, top_n=2)
-    assert len(champ) == 2
+    assert len(champ) <= 2
     assert all(np.isfinite(r.points_lost) for r in champ)
 
     chall_applicant = pd.Series(
-        {"fico_range_low": 600.0, "dti": np.nan, "home_ownership": "RENT"}
+        {"fico_range_low": 300.0, "dti": np.nan, "home_ownership": "RENT"}
     )
     chall = challenger_reason_codes(challenger_bundle, chall_applicant, CHALLENGER_VARS)
-    assert len(chall) == 3
+    assert len(chall) <= 3
     assert all(np.isfinite(r.shap_value) for r in chall)
 
 
@@ -368,8 +420,14 @@ def test_champion_reason_codes_parses_percent_string_revol_util():
 
 
 @pytest.mark.skipif(
-    not (CHAMPION_ARTIFACT.exists() and CHALLENGER_ARTIFACT.exists() and ACCEPTED_PARQUET_PATH.exists()),
-    reason="trained artifacts or raw accepted parquet not available locally",
+    not (
+        CHAMPION_ARTIFACT.exists()
+        and CHALLENGER_ARTIFACT.exists()
+        and CHAMPION_MANIFEST.exists()
+        and CHALLENGER_MANIFEST.exists()
+        and ACCEPTED_PARQUET_PATH.exists()
+    ),
+    reason="trained artifacts, manifests, or raw accepted parquet not available locally",
 )
 def test_real_artifacts_reason_codes_end_to_end():
     import joblib
@@ -388,6 +446,9 @@ def test_real_artifacts_reason_codes_end_to_end():
     champion_result = champion_reason_codes(champion_bundle, applicant, variables)
     challenger_result = challenger_reason_codes(challenger_bundle, applicant, variables)
 
-    assert len(champion_result) == 3
-    assert len(challenger_result) == 3
-    assert all(r.points_lost >= 0 for r in champion_result)
+    # counts are no longer guaranteed to equal top_n=3: only genuinely
+    # adverse factors qualify (code review finding)
+    assert len(champion_result) <= 3
+    assert len(challenger_result) <= 3
+    assert all(r.points_lost > 0 for r in champion_result)
+    assert all(r.shap_value > 0 for r in challenger_result)
