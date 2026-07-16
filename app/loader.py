@@ -23,14 +23,16 @@ import numpy as np
 import pandas as pd
 
 from scorecard import strategy
-from scorecard.config import ARTIFACTS_DIR, DATA_DIR
+from scorecard.config import ACCEPTED_PARQUET, ARTIFACTS_DIR, DATA_DIR
 from scorecard.evaluation import compute_metrics, population_stability_index
 from scorecard.grading import validate_monotonic
+from scorecard.profit import load_profit_frame, profit_cutoff_curve
 from scorecard.reasons import build_challenger_explainer
 
 logger = logging.getLogger("app.loader")
 
 SCORED_FRAME_PATH = DATA_DIR / "scored_validation_frame.parquet"
+CURRENT_CUTOFF = 546.0  # story-owner decision: reuses Story 2.1's OOT report value
 
 REQUIRED_BUNDLE_KEYS = {
     "champion": {"model", "binners"},
@@ -73,6 +75,14 @@ class ModelStore:
     curves: dict[str, pd.DataFrame] = field(default_factory=dict)
     grade_tables: dict[str, list[dict]] = field(default_factory=dict)
     monotonic_validated: dict[str, bool] = field(default_factory=dict)
+    # Story 2.4: profit_base_curves are computed ONCE at startup with
+    # avg_loan_amnt=1.0 baked in (approval_rate/avg_return_rate/
+    # approved_count don't depend on avg_loan_amnt at all, and
+    # expected_annual_profit scales linearly with it) - the per-request
+    # endpoint just multiplies this precomputed column by the requested
+    # avg_loan_amnt instead of re-scanning the ~283k-row population on every
+    # call (same precompute-at-startup pattern as `curves` above).
+    profit_base_curves: dict[str, pd.DataFrame] = field(default_factory=dict)
 
     def model_version(self, model_type: str) -> str:
         return self.manifests.get(model_type, {}).get("model_version", "unknown")
@@ -199,6 +209,10 @@ def load_store() -> ModelStore:
             raise FileNotFoundError(f"scored validation frame missing: {SCORED_FRAME_PATH}")
         store.frame = pd.read_parquet(SCORED_FRAME_PATH)
 
+        if not ACCEPTED_PARQUET.exists():
+            raise FileNotFoundError(f"raw accepted parquet missing: {ACCEPTED_PARQUET}")
+        profit_frame = load_profit_frame(store.frame, ACCEPTED_PARQUET)
+
         store.explainer = build_challenger_explainer(store.bundles["challenger"])
 
         champion_binners = store.bundles["champion"]["binners"]
@@ -222,6 +236,9 @@ def load_store() -> ModelStore:
             )
             store.grade_tables[name] = table
             store.monotonic_validated[name] = mono
+            store.profit_base_curves[name] = profit_cutoff_curve(
+                profit_frame, name, avg_loan_amnt=1.0
+            )
 
         store.loaded = True
         logger.info(

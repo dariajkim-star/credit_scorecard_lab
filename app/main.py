@@ -17,11 +17,12 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from app import schemas
-from app.loader import ModelStore, load_store
+from app.loader import CURRENT_CUTOFF, ModelStore, load_store
 from scorecard import strategy
 from scorecard.evaluation import challenger_p_bad, champion_p_bad, generalized_score
 from scorecard.grading import assign_grade
 from scorecard.preprocessing import CATEGORICAL_COLUMNS
+from scorecard.profit import find_optimal_cutoff
 from scorecard.reasons import challenger_reason_codes, champion_reason_codes
 
 logger = logging.getLogger("app.api")
@@ -268,4 +269,58 @@ def simulate_cutoff(payload: schemas.CutoffSimRequest) -> schemas.CutoffSimRespo
         bad_rate_approved=point["bad_rate"],
         bad_rate_rejected=point["bad_rate_rejected"],
         curve=curve,
+    )
+
+
+def _profit_point(base_curve: pd.DataFrame, cutoff: float, avg_loan_amnt: float) -> tuple[dict, float]:
+    """Nearest-cutoff lookup on the precomputed unscaled curve (avg_loan_amnt=1
+    baked in at startup, scaled here) + its approval_rate. Nearest instead of
+    exact match since current_cutoff (546.0) rarely lands exactly on one of
+    the 101 grid points."""
+    idx = (base_curve["cutoff"] - cutoff).abs().idxmin()
+    row = base_curve.loc[idx]
+    approval_rate = None if pd.isna(row["approval_rate"]) else float(row["approval_rate"])
+    expected_annual_profit = float(row["expected_annual_profit"]) * avg_loan_amnt
+    return {"approval_rate": approval_rate, "expected_annual_profit": expected_annual_profit}, float(row["cutoff"])
+
+
+@app.post("/v1/simulate/profit-cutoff")
+def simulate_profit_cutoff(payload: schemas.ProfitCutoffRequest) -> schemas.ProfitCutoffResponse:
+    _require_loaded()
+    base_curve = STORE.profit_base_curves[payload.model]  # avg_loan_amnt=1.0 baked in, precomputed
+
+    current, current_snapped = _profit_point(base_curve, CURRENT_CUTOFF, payload.avg_loan_amnt)
+    optimal_cutoff = find_optimal_cutoff(base_curve)  # argmax is scale-invariant to avg_loan_amnt
+    optimal, _ = _profit_point(base_curve, optimal_cutoff, payload.avg_loan_amnt)
+
+    curve = [
+        schemas.ProfitCurvePoint(
+            cutoff=round(row["cutoff"], 2),
+            approval_rate=None if pd.isna(row["approval_rate"]) else round(row["approval_rate"], 4),
+            expected_annual_profit=round(float(row["expected_annual_profit"]) * payload.avg_loan_amnt, 2),
+        )
+        for row in base_curve.to_dict("records")
+    ]
+    delta_approval_pp = None
+    if current["approval_rate"] is not None and optimal["approval_rate"] is not None:
+        delta_approval_pp = round((optimal["approval_rate"] - current["approval_rate"]) * 100, 2)
+
+    logger.info("profit cutoff simulation: model_version=%s current=%.1f optimal=%.1f",
+                STORE.model_version(payload.model), current_snapped, optimal_cutoff)
+    return schemas.ProfitCutoffResponse(
+        current_cutoff=round(current_snapped, 2),
+        optimal_cutoff=round(optimal_cutoff, 2),
+        current=schemas.ProfitPoint(**current),
+        optimal=schemas.ProfitPoint(**optimal),
+        delta=schemas.ProfitDelta(
+            approval_rate_pp=delta_approval_pp if delta_approval_pp is not None else 0.0,
+            annual_profit_krw=round(optimal["expected_annual_profit"] - current["expected_annual_profit"], 2),
+        ),
+        curve=curve,
+        assumptions=[
+            "연간 볼륨은 OOT 검증 표본(2015 빈티지) 규모를 그대로 1년치 승인 볼륨으로 가정한다(별도 확대 계수 없음).",
+            "평균 대출금액은 요청 파라미터(avg_loan_amnt)로 스케일링하며, 실제 승인 건별 대출금액 분포는 반영하지 않는다.",
+            "회수율(recoveries)·상환액(total_pymnt)은 검증 표본의 실측치를 그대로 사용하며, 향후 금리·매크로 환경 변화는 반영하지 않는다.",
+            "이 값은 손익 시뮬레이션이며 실제 재무 데이터가 아니다.",
+        ],
     )

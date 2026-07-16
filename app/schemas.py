@@ -99,3 +99,34 @@ class CutoffSimResponse(BaseModel):
     bad_rate_approved: float | None
     bad_rate_rejected: float | None
     curve: list[CurvePoint]
+
+
+class ProfitCutoffRequest(BaseModel):
+    model: ModelChoiceSingle = "champion"
+    avg_loan_amnt: float = Field(..., gt=0)
+
+
+class ProfitPoint(BaseModel):
+    approval_rate: float | None
+    expected_annual_profit: float
+
+
+class ProfitDelta(BaseModel):
+    approval_rate_pp: float
+    annual_profit_krw: float
+
+
+class ProfitCurvePoint(BaseModel):
+    cutoff: float
+    approval_rate: float | None
+    expected_annual_profit: float
+
+
+class ProfitCutoffResponse(BaseModel):
+    current_cutoff: float
+    optimal_cutoff: float
+    current: ProfitPoint
+    optimal: ProfitPoint
+    delta: ProfitDelta
+    curve: list[ProfitCurvePoint]
+    assumptions: list[str] = Field(..., min_length=1)

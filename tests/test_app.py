@@ -286,3 +286,52 @@ def test_score_logs_model_version(client, caplog):
     with caplog.at_level(logging.INFO, logger="app.api"):
         client.post("/v1/score", json=APPLICANT)
     assert any("model_version=champion-1.0.0" in r.message for r in caplog.records)
+
+
+# --- Story 2.4: /v1/simulate/profit-cutoff -----------------------------------
+
+
+def test_profit_cutoff_response_shape_and_assumptions(client):
+    r = client.post("/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 12000.0})
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body) == {
+        "current_cutoff", "optimal_cutoff", "current", "optimal", "delta", "curve", "assumptions",
+    }
+    assert len(body["assumptions"]) >= 1  # AC #2: never empty
+    assert len(body["curve"]) == 101
+    assert body["current"]["expected_annual_profit"] != body["optimal"]["expected_annual_profit"]
+
+
+def test_profit_cutoff_delta_matches_current_and_optimal(client):
+    body = client.post(
+        "/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 12000.0}
+    ).json()
+    expected_delta = body["optimal"]["expected_annual_profit"] - body["current"]["expected_annual_profit"]
+    assert body["delta"]["annual_profit_krw"] == pytest.approx(expected_delta, abs=0.01)
+
+
+def test_profit_cutoff_optimal_never_worse_than_current(client):
+    """By construction (grid-search argmax), the optimal point's profit can
+    never be less than any other point on the curve, including current."""
+    body = client.post(
+        "/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 12000.0}
+    ).json()
+    assert body["optimal"]["expected_annual_profit"] >= body["current"]["expected_annual_profit"]
+
+
+def test_profit_cutoff_scales_linearly_with_avg_loan_amnt(client):
+    small = client.post(
+        "/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 1000.0}
+    ).json()
+    large = client.post(
+        "/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 10000.0}
+    ).json()
+    assert large["current"]["expected_annual_profit"] == pytest.approx(
+        small["current"]["expected_annual_profit"] * 10, rel=1e-6
+    )
+
+
+def test_profit_cutoff_rejects_nonpositive_avg_loan_amnt(client):
+    r = client.post("/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 0})
+    assert r.status_code == 422
