@@ -1,5 +1,5 @@
 # generated: 2026-07-13
-# last_updated: 2026-07-13
+# last_updated: 2026-07-16
 # project: credit-scorecard-lab
 # project_key: NOKEY
 # tracking_system: file-system
@@ -53,7 +53,7 @@
 # - Epic DoD (all epics): demo artifact + git commit + Obsidian mirror.
 
 generated: 2026-07-13
-last_updated: 2026-07-13
+last_updated: 2026-07-16
 project: credit-scorecard-lab
 # story 1-1 created & set ready-for-dev on 2026-07-13; epic-1 -> in-progress
 project_key: NOKEY
@@ -72,8 +72,8 @@ development_status:
   1-7a-evaluation-grading: done
   1-7b-psi-validation-frame-manifest: done
   epic-1-retrospective: optional
-  epic-2: backlog
-  2-1-cutoff-simulation-swapset: backlog
+  epic-2: in-progress
+  2-1-cutoff-simulation-swapset: done
   2-2-reason-codes: backlog
   2-3-fastapi-scoring-serving: backlog
   2-4-profit-based-cutoff: backlog
