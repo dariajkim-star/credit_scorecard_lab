@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,21 @@ class ModelStore:
     variables: list[str] = field(default_factory=list)
     frame: pd.DataFrame | None = None
     explainer: Any = None
+    # Sync FastAPI endpoints run in the anyio threadpool, so concurrent
+    # /v1/score?model=challenger requests could call shap_values() on the
+    # SAME shared TreeExplainer simultaneously - its C-level buffers are not
+    # documented as thread-safe (code review finding, unverified either way
+    # since TestClient is sequential). A lock costs nothing at this
+    # explainer's ~30ms call time (NFR2 budget is 300ms) and removes the risk
+    # entirely rather than leaving it as an unverified assumption.
+    explainer_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Known training-time categories per categorical variable (from the
+    # champion binner's own bin table) - lets the API warn on an unseen
+    # category instead of silently routing it through the Special bin
+    # (champion) / an arbitrary fresh category code (challenger). Both
+    # models share the same categorical variables and training data, so one
+    # binner's categories cover both (code review finding).
+    known_categories: dict[str, set[str]] = field(default_factory=dict)
     # Precomputed at startup (frame and artifacts are immutable, AD-4):
     metrics: dict[str, dict[str, float]] = field(default_factory=dict)
     curves: dict[str, pd.DataFrame] = field(default_factory=dict)
@@ -93,8 +109,16 @@ def _frame_metrics(frame: pd.DataFrame, model_type: str) -> dict[str, float]:
     psi = population_stability_index(
         valid["score"].to_numpy(dtype=float), oot["score"].to_numpy(dtype=float)
     )
-    return {"auc_oot": round(m["auc"], 4), "ks_oot": round(m["ks"], 4),
-            "psi_score": round(psi, 4)}
+
+    def _clean(value: float) -> float | None:
+        # NaN is not valid JSON; a degenerate OOT slice (single-class
+        # bad_flag, empty split) would otherwise ship an unparseable
+        # "NaN" token in /v1/model/info with no other guard on this path
+        # (code review finding - every other numeric response path already
+        # null-guards NaN, this precomputed one didn't).
+        return None if not np.isfinite(value) else round(float(value), 4)
+
+    return {"auc_oot": _clean(m["auc"]), "ks_oot": _clean(m["ks"]), "psi_score": _clean(psi)}
 
 
 def _grade_table(frame: pd.DataFrame, model_type: str, thresholds: list[float]) -> tuple[list[dict], bool]:
@@ -111,13 +135,26 @@ def _grade_table(frame: pd.DataFrame, model_type: str, thresholds: list[float]) 
     edges as internal thresholds and produced 12 phantom grades, caught by
     test_grades_table_consistent_with_scoring).
 
+    IMPORTANT boundary semantics (code review finding): pd.cut is
+    right-inclusive, so **score_min is EXCLUSIVE and score_max is
+    INCLUSIVE** - a score exactly equal to a grade's score_min belongs to
+    the NEXT LOWER grade, not this one. A consumer band-matching by
+    `score_min <= score <= score_max` will misclassify scores that land
+    exactly on an edge; the correct check is
+    `(score_min is None or score > score_min) and (score_max is None or score <= score_max)`.
+    API_SPEC.md §3 documents this explicitly.
+
     The frame already carries each row's assigned grade (1.7b), so
     observed_bad_rate is a groupby - no re-grading here.
     """
     rows = frame[(frame["model_type"] == model_type) & (frame["vintage"] == strategy.OOT_VINTAGE)]
     edges = np.asarray(thresholds, dtype=float)
     n_bins = len(edges) - 1
-    by_grade = rows.groupby("grade")["bad_flag"].agg(["mean", "size"])
+    # Grade must be a plain int for `grade in by_grade.index` to match below -
+    # a float/nullable-Int64 grade column (e.g. after a parquet round-trip)
+    # would make every "in" check silently False, producing an all-None
+    # table with no error (code review finding).
+    by_grade = rows.assign(grade=rows["grade"].astype(int)).groupby("grade")["bad_flag"].agg(["mean", "size"])
 
     table: list[dict] = []
     for grade in range(1, n_bins + 1):
@@ -163,6 +200,19 @@ def load_store() -> ModelStore:
         store.frame = pd.read_parquet(SCORED_FRAME_PATH)
 
         store.explainer = build_challenger_explainer(store.bundles["challenger"])
+
+        champion_binners = store.bundles["champion"]["binners"]
+        for var, binner in champion_binners.items():
+            if binner.dtype != "categorical":
+                continue
+            table = binner.binning_table.build()
+            real_bins = table[~table["Bin"].isin(["Special", "Missing"]) & (table.index != "Totals")]
+            categories: set[str] = set()
+            for bin_group in real_bins["Bin"]:
+                # optbinning groups same-WOE categories into one bin, e.g.
+                # "[RENT, NONE, OTHER]" - split back into individual values.
+                categories.update(c.strip() for c in str(bin_group).strip("[]").split(","))
+            store.known_categories[var] = categories
 
         for name in ("champion", "challenger"):
             store.metrics[name] = _frame_metrics(store.frame, name)

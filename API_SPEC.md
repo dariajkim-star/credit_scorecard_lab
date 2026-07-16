@@ -47,25 +47,32 @@
     "metrics": { "auc_oot": 0.74, "ks_oot": 0.31 }
   },
   "sample_design": {
-    "train_vintages": "2012-2014", "oot_vintages": "2015",
-    "bad_definition": "loan_status in (Charged Off, Default)"
+    "train_vintages": "2012-2013", "valid_vintage": "2014", "oot_vintage": "2015",
+    "bad_definition": "loan_status in (Charged Off, Default), 36-month term"
   }
 }
 ```
 
+`metrics.psi_score`는 valid→OOT 점수 PSI(서빙이 소비 가능한 것은 `scored_validation_frame`의 valid+oot뿐 — 1.7b 리포트의 train→OOT PSI와는 다른 비교축, 둘 다 <0.1 목표는 동일).
+
 ## 3. GET /v1/grades
 
-등급 체계 테이블 (등급별 점수 구간·PD 구간·관측 부도율).
+등급 체계 테이블 (등급별 점수 구간·관측 부도율).
 
 ```json
 {
+  "model": "champion",
   "grades": [
-    { "grade": 1, "score_min": 720, "score_max": null, "pd_max": 0.02, "observed_bad_rate": 0.014 },
-    { "grade": 2, "score_min": 690, "score_max": 719, "pd_max": 0.04, "observed_bad_rate": 0.031 }
+    { "grade": 1, "score_min": 567.28, "score_max": null, "observed_bad_rate": 0.0463 },
+    { "grade": 2, "score_min": 559.05, "score_max": 567.28, "observed_bad_rate": 0.0801 }
   ],
   "monotonic_validated": true
 }
 ```
+
+- `?model=champion|challenger`(기본 champion) — 두 모델의 등급 임계치가 다르므로 모델별 표.
+- **경계는 우측폐구간**(`(score_min, score_max]`, `pd.cut` 관례): `score_min`은 배타적, `score_max`는 포함. 정확히 `score_min`과 같은 점수는 이 등급이 아니라 한 단계 아래(더 낮은) 등급이다.
+- `pd_max` 필드는 제공하지 않는다(v0.2 예시에 있었으나 등급별 PD 상한을 산출하는 로직이 스코프에 없음 — 등급은 점수 분위수 기반, PD는 관측 부도율로만 노출).
 
 ## 4. POST /v1/score — 단건 스코어링 (핵심)
 
@@ -96,18 +103,18 @@
   "pd": 0.061,
   "grade": 4,
   "reason_codes": [
-    { "rank": 1, "code": "RC_REVOL_UTIL", "description": "리볼빙 한도소진율이 높음 (42.3%)", "points_lost": 22 },
-    { "rank": 2, "code": "RC_INQ6M", "description": "최근 6개월 신용조회 발생", "points_lost": 11 },
-    { "rank": 3, "code": "RC_DTI", "description": "소득 대비 부채비율이 평균 상회", "points_lost": 9 }
+    { "rank": 1, "variable": "revol_util", "description": "리볼빙 한도 소진율이(가) 심사 기준 대비 불리하여 점수가 22.0점 하락했습니다.", "points_lost": 22.0 },
+    { "rank": 2, "variable": "inq_last_6mths", "description": "최근 6개월 신용조회 건수이(가) 심사 기준 대비 불리하여 점수가 11.0점 하락했습니다.", "points_lost": 11.0 },
+    { "rank": 3, "variable": "dti", "description": "부채비율(DTI)이(가) 심사 기준 대비 불리하여 점수가 9.0점 하락했습니다.", "points_lost": 9.0 }
   ],
   "warnings": [],
-  "model": { "name": "logistic-scorecard", "version": "1.0.0", "type": "champion" }
+  "model": { "name": "champion", "version": "champion-1.0.0", "type": "champion" }
 }
 ```
 
-- `reason_codes`: 챔피언=특성별 점수손실 상위 3, 챌린저=SHAP 상위 3 (필드 구조 동일, `points_lost` → `shap_value`)
+- `reason_codes`: 챔피언=특성별 점수손실 상위 3, 챌린저=SHAP 상위 3 (필드 구조 동일 — `rank`/`variable`/`description` 공유, 값 필드만 `points_lost` ↔ `shap_value`, Story 2.2 AD-6). **실제로 불리한 요인만 포함**(0점 요인 제외) — 3개 미만일 수 있다.
 - `model=both` 시 `{ "champion": {...}, "challenger": {...}, "score_gap": ... }` 형태 — swap-set 데모용
-- `warnings`: 범위 경계 값 등 비차단 경고 목록
+- `warnings`: 결측 필드·미학습 카테고리 값 등 비차단 경고 목록(문자열)
 
 ## 5. POST /v1/score/batch
 

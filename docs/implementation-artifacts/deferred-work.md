@@ -12,3 +12,9 @@
 
 - **bundle 필수 키(`model`/`binners`/`calibrator`) 부재 시 bare KeyError** [scorecard/reasons.py] — 잘못된 아티팩트/구식 스키마 bundle이 들어오면 진단 맥락 없는 KeyError. 내부 도구 수준에서는 수용 가능하고, Story 2.3(FastAPI 서빙)이 아티팩트 로딩 계층을 만들 때 그 계층에서 명시적 스키마 검증(어느 파일의 어떤 키가 없는지)을 넣는 것이 자연스러운 위치.
 - **미등록 변수의 한국어 조사 fallback** [scorecard/reasons.py:_korean_label] — KOREAN_LABELS에 없는 변수는 raw 변수명 + "이(가)"로 조사가 어색한 문장이 됨(크래시는 아님). 현재 7개 변수 전부 등록돼 발생 불가. 변수가 추가되는 스토리(3.2 emp_title 파생 등)에서 라벨 등록을 DoD에 포함할 것.
+
+## Deferred from: code review (story-2-3) (2026-07-16)
+
+- **점수 반올림(1자리 표시)과 등급 산출(원값 기준) 경계 부근 표시 불일치** [app/main.py:_score_one] — score=546.04는 546.0으로 표시되지만 등급은 546.04 원값으로 산출됨. 경계 부근(±0.05점)에서만 발생하는 코스메틱 이슈, 실사용 영향 낮음. 필요해지면 표시용 점수를 등급 산출 후 스냅하는 방식 검토.
+- **등급표에서 OOT 관측 0건인 등급이 monotonic 검증에서 조용히 제외** [app/loader.py:_grade_table, scorecard/grading.py:validate_monotonic] — `observed_bad_rate=None` 행이 dropna로 빠지면서 그 등급의 데이터 공백이 monotonic_validated=true에 반영 안 됨. `grading.py` 변경(빈 등급 명시 플래그)이 필요해 서빙 스토리 범위 밖.
+- **`/v1/score`가 `SingleScoreResponse`/`BothScoreResponse` 두 타입을 반환하는데 명시 response_model 없음** [app/main.py] — 쿼리파라미터(`model=both`)에 따라 셰이프가 달라지는 의도된 패턴이라 FastAPI의 단일 response_model로 표현 불가. OpenAPI 문서화 개선(oneOf 등)은 대시보드(2.5) 연동 시 필요성 재평가.

@@ -89,13 +89,35 @@ def test_grades_table_consistent_with_scoring(client):
     assert len(table) >= 10
     assert table[0]["grade"] == 1 and table[0]["score_max"] is None  # best band open-ended
 
-    # a scored applicant's grade must fall in the band the table describes
+    # a scored applicant's grade must fall in the band the table describes.
+    # Boundary is right-inclusive (pd.cut convention): score_min EXCLUSIVE,
+    # score_max INCLUSIVE (code review finding - the original assertion here
+    # used >= on score_min, which is backwards at an exact-edge score).
     scored = client.post("/v1/score", json=APPLICANT).json()
     band = next(t for t in table if t["grade"] == scored["grade"])
     if band["score_min"] is not None:
-        assert scored["score"] >= band["score_min"]
+        assert scored["score"] > band["score_min"]
     if band["score_max"] is not None:
         assert scored["score"] <= band["score_max"] + 1e-6
+
+
+def test_grade_band_boundary_is_right_inclusive(client):
+    """A score exactly ON an edge belongs to the interval that INCLUDES it:
+    (score_min, score_max] is right-inclusive, so a score equal to grade g's
+    score_min falls into the NEXT-WORSE grade (g+1), not grade g itself."""
+    from scorecard.grading import assign_grade
+
+    grades = client.get("/v1/grades").json()["grades"]
+    edge_grade = next(t for t in grades if t["score_min"] is not None)
+    edge_score = edge_grade["score_min"]
+
+    import json
+
+    from scorecard.config import ARTIFACTS_DIR
+
+    thresholds = json.loads((ARTIFACTS_DIR / "champion_manifest.json").read_text())["grade_thresholds"]
+    computed = int(assign_grade(np.array([edge_score]), np.asarray(thresholds))[0])
+    assert computed == edge_grade["grade"] + 1  # one grade WORSE than the band listing it as score_min
 
 
 def test_score_champion_response_shape(client):
@@ -145,6 +167,24 @@ def test_batch_over_limit_is_422(client):
     assert r.status_code == 422
 
 
+def test_batch_bad_applicant_named_by_index_before_any_scoring(client):
+    """A bound violation anywhere in the batch must name which applicant
+    failed, and must be caught before any SHAP computation runs (code
+    review finding: the original implementation interleaved validation with
+    scoring, wasting work and never identifying the culprit)."""
+    applicants = [APPLICANT] * 3 + [{**APPLICANT, "dti": 99999}] + [APPLICANT]
+    r = client.post("/v1/score/batch", json={"applicants": applicants})
+    assert r.status_code == 400
+    body = r.json()
+    assert body["error_code"] == "VALUE_OUT_OF_RANGE"
+    assert "applicant[3]" in body["detail"]
+
+
+def test_batch_rejects_model_both(client):
+    r = client.post("/v1/score/batch", json={"applicants": [APPLICANT]}, params={"model": "both"})
+    assert r.status_code == 422
+
+
 def test_simulate_cutoff_matches_strategy(client):
     r = client.post("/v1/simulate/cutoff", json={"cutoff_score": 546.0, "model": "champion"})
     assert r.status_code == 200
@@ -163,6 +203,21 @@ def test_simulate_cutoff_matches_strategy(client):
     assert body["bad_rate_rejected"] == pytest.approx(expected["bad_rate_rejected"])
 
 
+def test_simulate_cutoff_extreme_values_degrade_gracefully(client):
+    """A cutoff above every observed score (0% approval) or below every
+    observed score (100% approval) must not crash - one of the two bad
+    rates becomes null (no approved/rejected population on that side)."""
+    r_high = client.post("/v1/simulate/cutoff", json={"cutoff_score": 100000.0, "model": "champion"})
+    assert r_high.status_code == 200
+    assert r_high.json()["approval_rate"] == 0.0
+    assert r_high.json()["bad_rate_approved"] is None
+
+    r_low = client.post("/v1/simulate/cutoff", json={"cutoff_score": -100000.0, "model": "champion"})
+    assert r_low.status_code == 200
+    assert r_low.json()["approval_rate"] == 1.0
+    assert r_low.json()["bad_rate_rejected"] is None
+
+
 # --- error contract with loaded store ----------------------------------------
 
 
@@ -176,6 +231,36 @@ def test_value_out_of_range_is_400_with_error_code(client):
 
 def test_all_null_request_is_422(client):
     assert client.post("/v1/score", json={}).status_code == 422
+
+
+def test_misspelled_field_is_422_not_silently_dropped(client):
+    """extra='forbid': a typo'd field name must not be silently ignored and
+    scored as if that real field were missing (code review finding)."""
+    typo = {**APPLICANT}
+    typo["anual_inc"] = typo.pop("annual_inc")
+    r = client.post("/v1/score", json=typo)
+    assert r.status_code == 422
+
+
+def test_hard_bound_edges_are_inclusive(client):
+    """FICO 300/850 and annual_inc=0 are real, valid inputs - the boundary
+    check must accept them, not just values strictly inside the range."""
+    edge = {**APPLICANT, "fico_range_low": 300.0, "annual_inc": 0.0}
+    assert client.post("/v1/score", json=edge).status_code == 200
+    edge2 = {**APPLICANT, "fico_range_low": 850.0}
+    assert client.post("/v1/score", json=edge2).status_code == 200
+
+
+def test_unseen_category_scores_with_warning_not_silently(client):
+    """A category value never observed in training (e.g. a typo or a new
+    Lending Club value) is silently routed through the Special/Missing bin
+    by both models with no error (verified empirically in code review) -
+    the API must at least surface a warning instead of pretending it's a
+    normal, fully-supported input."""
+    body = client.post(
+        "/v1/score", json={**APPLICANT, "home_ownership": "CONDO"}
+    ).json()
+    assert any("home_ownership" in w and "CONDO" in w for w in body["warnings"])
 
 
 # --- NFR2: /v1/score p95 < 300ms ----------------------------------------------

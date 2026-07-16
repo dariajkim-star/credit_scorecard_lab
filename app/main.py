@@ -55,15 +55,33 @@ async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     )
 
 
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Anything unanticipated (unseen-category edge case an underlying
+    # library does decide to raise on, a version-skew joblib load issue,
+    # etc.) previously escaped as FastAPI's bare default 500 body - no
+    # "detail"/"error_code", breaking the §0 contract every other response
+    # path honors (code review finding). Not one of the 3 documented codes,
+    # but keeps the response *shape* consistent for the P3 consumer.
+    logger.exception("unhandled error in %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"internal error: {exc}", "error_code": "INTERNAL_ERROR"},
+    )
+
+
 def _require_loaded() -> None:
     if not STORE.loaded:
         raise ApiError(503, f"model artifacts not loaded: {STORE.error}", "MODEL_NOT_LOADED")
 
 
-def _check_bounds(payload: schemas.ScoreRequest) -> list[str]:
-    """400 on hard-bound violations; warnings inside bounds but clearly
-    atypical (outside FICO-adjacent typical ranges handled by open-ended
-    outer WOE bins). Bounds rationale: schemas.HARD_BOUNDS docstring."""
+def _check_bounds(payload: schemas.ScoreRequest, index: int | None = None) -> list[str]:
+    """400 on hard-bound violations; warnings for missing fields and unseen
+    categorical values (both scored, but silently - the caller should know).
+    Bounds rationale: schemas.HARD_BOUNDS docstring. ``index`` (batch only)
+    names which applicant failed, so a 400 doesn't discard 499 good results
+    with no way to identify the culprit (code review finding)."""
+    prefix = f"applicant[{index}]: " if index is not None else ""
     warnings: list[str] = []
     for field_name, (lo, hi) in schemas.HARD_BOUNDS.items():
         value = getattr(payload, field_name)
@@ -72,13 +90,22 @@ def _check_bounds(payload: schemas.ScoreRequest) -> list[str]:
         if value < lo or value > hi:
             raise ApiError(
                 400,
-                f"{field_name}={value} is outside the acceptable range [{lo}, {hi}] - "
+                f"{prefix}{field_name}={value} is outside the acceptable range [{lo}, {hi}] - "
                 "the model cannot produce a trustworthy score for this input",
                 "VALUE_OUT_OF_RANGE",
             )
     for field_name in ("fico_range_low", "annual_inc", "dti", "revol_util", "inq_last_6mths"):
         if getattr(payload, field_name) is None:
-            warnings.append(f"{field_name} is missing - scored via the fitted Missing bin")
+            warnings.append(f"{field_name} is missing")
+    # Unseen category: silently routed through the Special bin (champion) or
+    # an uncalibrated fresh category code (challenger) with no error - found
+    # empirically in code review (neither path raises). Warn instead of
+    # trusting the model's silent handling.
+    for field_name in ("home_ownership", "purpose"):
+        value = getattr(payload, field_name)
+        known = STORE.known_categories.get(field_name)
+        if value is not None and known is not None and value not in known:
+            warnings.append(f"{field_name}={value!r} was not observed in training data")
     return warnings
 
 
@@ -110,9 +137,10 @@ def _score_one(payload: schemas.ScoreRequest, model_type: str, warnings: list[st
         reason_codes = champion_reason_codes(bundle, df.iloc[0], variables)
     else:
         p_bad = float(challenger_p_bad(bundle, df, variables)[0])
-        reason_codes = challenger_reason_codes(
-            bundle, df.iloc[0], variables, explainer=STORE.explainer
-        )
+        with STORE.explainer_lock:  # shared TreeExplainer, not verified thread-safe
+            reason_codes = challenger_reason_codes(
+                bundle, df.iloc[0], variables, explainer=STORE.explainer
+            )
     score = float(np.asarray(generalized_score(np.array([p_bad])))[0])
     grade = int(assign_grade(np.array([score]), np.asarray(manifest["grade_thresholds"]))[0])
 
@@ -176,11 +204,17 @@ def score(
     model: schemas.ModelChoice = Query("champion"),
 ):
     _require_loaded()
-    warnings = _check_bounds(payload)
     if model in ("champion", "challenger"):
+        warnings = _check_bounds(payload)
         return _score_one(payload, model, warnings)
-    champ = _score_one(payload, "champion", warnings)
-    chall = _score_one(payload, "challenger", warnings)
+    # _check_bounds is called once per model rather than sharing one list -
+    # a shared list instance embedded in both response objects would alias
+    # (mutating one response's warnings would silently mutate the other's),
+    # and a single bounds check can't be re-run per model anyway since
+    # ApiError already stops the request on the first violation regardless
+    # (code review finding).
+    champ = _score_one(payload, "champion", _check_bounds(payload))
+    chall = _score_one(payload, "challenger", _check_bounds(payload))
     return schemas.BothScoreResponse(
         champion=champ, challenger=chall,
         score_gap=round(chall.score - champ.score, 1),
@@ -190,13 +224,21 @@ def score(
 @app.post("/v1/score/batch")
 def score_batch(
     payload: schemas.BatchScoreRequest,
-    model: str = Query("champion", pattern="^(champion|challenger)$"),
+    model: schemas.ModelChoiceSingle = Query("champion"),
 ) -> schemas.BatchScoreResponse:
     _require_loaded()
-    results = []
-    for applicant in payload.applicants:
-        warnings = _check_bounds(applicant)
-        results.append(_score_one(applicant, model, warnings))
+    # Validate every applicant BEFORE scoring any of them: scoring runs SHAP
+    # per applicant, so failing fast after applicant #500 of 1000 (previous
+    # behavior) wasted 499 SHAP computations and discarded all their results
+    # for a single bad input, with no indication which one failed (code
+    # review finding). The index in the error lets the caller find it.
+    all_warnings = [
+        _check_bounds(applicant, index=i) for i, applicant in enumerate(payload.applicants)
+    ]
+    results = [
+        _score_one(applicant, model, warnings)
+        for applicant, warnings in zip(payload.applicants, all_warnings)
+    ]
     distribution: dict[int, int] = {}
     for r in results:
         distribution[r.grade] = distribution.get(r.grade, 0) + 1

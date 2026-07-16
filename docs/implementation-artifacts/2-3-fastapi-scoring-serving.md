@@ -4,7 +4,7 @@ baseline_commit: 3529544
 
 # Story 2.3: FastAPI 스코어링 서빙
 
-Status: review
+Status: done
 
 ## Story
 
@@ -59,6 +59,28 @@ so that 판정 로직 없이 스코어링 결과를 소비할 수 있다.
   - [x] p95 계측: TestClient로 /v1/score 워밍업 후 ≥20회, p95<300ms assert(수치는 리포트 기록)
   - [x] 라이브 uvicorn 기동 → 실제 HTTP로 6개 엔드포인트 호출 실증(응답을 P3 예시 문서에 사용)
   - [x] `pytest -q` 전체 통과(기존 128 + 신규)
+
+### Review Findings (code review 2026-07-16, Blind Hunter + Edge Case Hunter + Acceptance Auditor 병렬 — patch 12/defer 3/dismiss 3)
+
+- [x] [Review][Patch] **등급 경계가 우측폐구간인데 문서·테스트가 반대 방향으로 가정**(High, 두 리뷰어 독립 발견) [app/loader.py:_grade_table, tests] — `score_min`은 배타적·`score_max`는 포함이 맞는데 테스트가 `score>=score_min`으로 검증하고 있었음(정확히 경계인 점수는 사실 한 등급 아래). docstring에 명시 + API_SPEC §3에 경계 규칙 문서화 + 테스트 방향 수정 + 경계 실증 테스트 신규.
+- [x] [Review][Patch] **`/v1/model/info` 메트릭에 NaN 관통 시 JSON 직렬화 파괴**(High) [app/loader.py:_frame_metrics] — 다른 모든 경로는 NaN 가드가 있는데 이 사전계산 값만 없었음. `_clean()`로 비유한 값→None 정규화.
+- [x] [Review][Patch] **미확인 카테고리 값이 두 모델 다 조용히 통과**(실증 확인 — champion은 Special-bin WOE≈0, challenger는 크래시 없이 예측) [app/loader.py, app/main.py] — 학습 시점 카테고리 목록을 champion binner에서 추출해 `STORE.known_categories`로 저장, 미확인 값은 경고로 노출(차단은 아님). 라이브 실증 완료.
+- [x] [Review][Patch] **배치: 하나가 잘못되면 전체 폐기 + 어느 건인지 안 알려줌**(500번째에서 실패 시 이미 SHAP 계산한 499건 낭비) [app/main.py:score_batch] — 스코어링 전에 **전건 선검증**으로 변경, 에러 메시지에 `applicant[i]` 인덱스 포함. 라이브 실증.
+- [x] [Review][Patch] **`model=both`에서 warnings 리스트 객체 공유(에일리어싱) + 챔피언 전용 문구가 챌린저에도 붙음** [app/main.py:score] — 모델별로 `_check_bounds` 독립 호출, 문구를 모델 중립적으로 단순화("is missing"만, WOE/네이티브 NaN 언급 제거).
+- [x] [Review][Patch] **미문서 예외가 계약 밖 500으로 새어나감**(422/400/503 3종 외) [app/main.py] — `Exception` 핸들러 추가, `{detail, error_code:"INTERNAL_ERROR"}` 형태로 최소한 계약 형태는 유지.
+- [x] [Review][Patch] **공유 SHAP TreeExplainer의 스레드 안전성이 검증되지 않음(동시 요청 시 위험)** [app/loader.py, app/main.py] — `threading.Lock` 추가(호출당 ~30ms, NFR2 300ms 예산 대비 비용 무시 가능, p95 재측정 33.0ms로 영향 없음 확인).
+- [x] [Review][Patch] **필드명 오탈자가 조용히 무시되고 해당 필드가 "결측"으로 스코어링됨** [app/schemas.py] — `ScoreRequest`에 `extra="forbid"` 추가, 422로 전환.
+- [x] [Review][Patch] **등급 groupby가 grade 컬럼 dtype 불일치 시 전부 None으로 조용히 실패할 수 있음** [app/loader.py:_grade_table] — groupby 전 `astype(int)` 명시 캐스팅.
+- [x] [Review][Patch] **API_SPEC v0.3 스펙-구현 필드명 불일치 3건**(Acceptance Auditor) — `sample_design` 키(train_vintages 등 실제 구현에 맞춤), `/v1/grades`의 `pd_max`(미산출 필드라 스펙에서 제거 + 사유 명시), reason_codes의 `code`→`variable`(2.2 실제 필드명으로 스펙 예시 갱신).
+- [x] [Review][Patch] **배치 `model` 파라미터가 타입 불일치(regex string vs Literal) + "both" 허용 여부 불문명** [app/main.py] — `ModelChoiceSingle` Literal 타입으로 정합, "both" 명시 거부(422) 테스트 추가.
+- [x] [Review][Patch] **HARD_BOUNDS 경계값(FICO 300/850, annual_inc=0) 포함 여부 미검증** — 경계 포함 테스트 추가(실제 유효 신청자 케이스라 배타적으로 바뀌면 안 됨).
+- [x] [Review][Patch] **극단 cutoff_score(관측범위 밖) 미검증** — 0%/100% 승인률 양끝 케이스 테스트 추가(None 필드 정상 처리 확인).
+- [x] [Review][Defer] **점수 반올림(1자리)과 등급이 원값 기준이라 경계 부근에서 표시 불일치 가능**(코스메틱, 실사용 영향 낮음) — deferred-work.md.
+- [x] [Review][Defer] **등급표에서 OOT 관측 0건인 등급이 monotonic 검증에서 조용히 제외됨** — grading.py 변경이 필요해 이 스토리 범위 밖, deferred-work.md.
+- [x] [Review][Defer] **`/v1/score` 응답이 `SingleScoreResponse`/`BothScoreResponse` 두 타입이라 명시 response_model 없음** — FastAPI에서 쿼리파라미터에 따라 다른 셰이프를 반환하는 의도된 패턴(OpenAPI 문서화 개선은 후속 스토리), deferred-work.md.
+- [x] [Review][Dismiss] **단일행 category 캐스팅이 잘못된 코드로 인코딩될 것이라는 의혹**(Blind Hunter #1) — **실증 기각**: 서로 다른 home_ownership/purpose 값이 실제로 다른 예측 확률을 낸다는 것을 직접 확인(2.2에서 이미 같은 계열 의혹을 20행 실증으로 기각한 것과 동일 메커니즘 — LightGBM booster가 `pandas_categorical`을 저장해 값 기준 재정렬).
+- [x] [Review][Dismiss] **STORE를 import 시점에 무겁게 로드 + 재로드 경로 없음** — AD-8(로컬 단일 프로세스) 설계상 의도된 것, 재로드가 필요하면 프로세스 재시작.
+- [x] [Review][Dismiss] **`dict[int,int]` grade_distribution의 JSON 키가 문자열로 직렬화됨** — JSON 표준 자체의 제약(객체 키는 항상 문자열), 코드 결함 아님.
 
 ## Dev Notes
 
@@ -134,3 +156,4 @@ claude-fable-5 (bmad-dev-story, /loop 자율 진행)
 
 - 2026-07-16: Story 2.3 생성 — API_SPEC 6개 엔드포인트, 재사용 지도(Epic1+2.1+2.2 함수 시그니처), 성능 캐싱 전략(SHAP explainer·curve 사전계산), 입력 스키마 7필드 확정(AD-5 스펙 선수정), bad_rate_rejected는 strategy.py에 추가(app은 조립만), 2.2 defer(bundle 키 검증) 인수.
 - 2026-07-16: Story 2.3 구현 — app/{loader,schemas,main}.py 신규, 6개 엔드포인트 전부 라이브 실증, p95=32.9ms(NFR2 9배 여유), 등급표 경계 버그·uvicorn 로깅 공백 2건을 정합성 테스트·라이브 실행이 각각 잡음. 144 passed. Status → review.
+- 2026-07-16: 코드리뷰(3-레이어 병렬) 반영 — patch 12건(등급경계 문서화·NaN가드·미확인 카테고리 경고·배치 선검증+인덱스·warnings 에일리어싱·전역 예외핸들러·SHAP 락·extra=forbid·grade dtype 캐스팅·API_SPEC 필드명 3건 동기화·배치 model 타입·경계값 테스트), defer 3건, dismiss 3건(카테고리 인코딩 의혹 실증 기각). 라이브 재검증(unseen category 경고·배치 인덱스·422 typo·등급 경계) 완료. pytest 151 passed(+7). p95 재측정 33.0ms(영향 없음). Status → done.

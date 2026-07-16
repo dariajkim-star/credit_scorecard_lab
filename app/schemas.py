@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from scorecard.reasons import ChallengerReasonCode, ChampionReasonCode
 
 ModelChoice = Literal["champion", "challenger", "both"]
+ModelChoiceSingle = Literal["champion", "challenger"]
 
 # Hard sanity bounds -> 400 VALUE_OUT_OF_RANGE (story-owner decision, recorded
 # in the 2.3 report): generous physical/plausibility limits, NOT the training
@@ -30,6 +31,12 @@ HARD_BOUNDS: dict[str, tuple[float, float]] = {
 
 
 class ScoreRequest(BaseModel):
+    # extra="forbid": a misspelled field name (e.g. "annual_income") would
+    # otherwise be silently dropped and the real field scored as missing -
+    # a wrong score with no error, for a credit decision input (code review
+    # finding; matches this codebase's fail-fast convention elsewhere).
+    model_config = ConfigDict(extra="forbid")
+
     fico_range_low: float | None = None
     annual_inc: float | None = None
     dti: float | None = None
