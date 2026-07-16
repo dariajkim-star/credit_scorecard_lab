@@ -14,6 +14,8 @@ import logging
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, Query, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app import schemas
@@ -53,6 +55,28 @@ async def api_error_handler(request: Request, exc: ApiError) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail, "error_code": exc.error_code},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    # allow_inf_nan=False rejects inf/nan at validation, but FastAPI's default
+    # 422 body echoes the offending value back under "input" - and stdlib json
+    # can't serialize inf/nan, so the 422 itself blew up into a 500 (code
+    # review finding). Stringify non-finite floats before serialization.
+    def _finite(v):
+        if isinstance(v, float) and not np.isfinite(v):
+            return str(v)
+        if isinstance(v, dict):
+            return {k: _finite(x) for k, x in v.items()}
+        if isinstance(v, (list, tuple)):
+            return [_finite(x) for x in v]
+        return v
+
+    return JSONResponse(
+        status_code=422, content={"detail": _finite(jsonable_encoder(exc.errors()))}
     )
 
 
@@ -276,11 +300,20 @@ def _profit_point(base_curve: pd.DataFrame, cutoff: float, avg_loan_amnt: float)
     """Nearest-cutoff lookup on the precomputed unscaled curve (avg_loan_amnt=1
     baked in at startup, scaled here) + its approval_rate. Nearest instead of
     exact match since current_cutoff (546.0) rarely lands exactly on one of
-    the 101 grid points."""
+    the 101 grid points (ties, if any, resolve to the first/lowest-index
+    match via pandas idxmin - immaterial in practice since the 101-point
+    grid's spacing makes exact ties on a real float score vanishingly rare).
+
+    expected_annual_profit is null when the snapped point has zero approvals
+    (undefined economics, not zero - code review finding, mirrors
+    profit_cutoff_curve's NaN-not-0.0 fix) rather than silently multiplying
+    NaN by avg_loan_amnt into a value that would break JSON serialization.
+    """
     idx = (base_curve["cutoff"] - cutoff).abs().idxmin()
     row = base_curve.loc[idx]
     approval_rate = None if pd.isna(row["approval_rate"]) else float(row["approval_rate"])
-    expected_annual_profit = float(row["expected_annual_profit"]) * avg_loan_amnt
+    raw_profit = row["expected_annual_profit"]
+    expected_annual_profit = None if pd.isna(raw_profit) else float(raw_profit) * avg_loan_amnt
     return {"approval_rate": approval_rate, "expected_annual_profit": expected_annual_profit}, float(row["cutoff"])
 
 
@@ -290,6 +323,22 @@ def simulate_profit_cutoff(payload: schemas.ProfitCutoffRequest) -> schemas.Prof
     base_curve = STORE.profit_base_curves[payload.model]  # avg_loan_amnt=1.0 baked in, precomputed
 
     current, current_snapped = _profit_point(base_curve, CURRENT_CUTOFF, payload.avg_loan_amnt)
+    if abs(current_snapped - CURRENT_CUTOFF) > 5.0:
+        # CURRENT_CUTOFF is a hardcoded constant (Story 2.1's value) that
+        # isn't guaranteed to stay inside a given model's actual score range
+        # forever (a retrain could shift it) - if the nearest grid point is
+        # far from the configured value, the "current" comparison is no
+        # longer meaningful and silently reporting it anyway would mislabel
+        # a fabricated stand-in as the real policy cutoff (code review
+        # finding). Warn loudly rather than fail the request outright, since
+        # the response is still internally consistent, just not what the
+        # constant's name implies.
+        logger.warning(
+            "CURRENT_CUTOFF=%.1f is %.1f points away from the nearest point in %s's "
+            "score grid (snapped to %.1f) - the 'current' comparison may not reflect "
+            "the intended policy cutoff",
+            CURRENT_CUTOFF, abs(current_snapped - CURRENT_CUTOFF), payload.model, current_snapped,
+        )
     optimal_cutoff = find_optimal_cutoff(base_curve)  # argmax is scale-invariant to avg_loan_amnt
     optimal, _ = _profit_point(base_curve, optimal_cutoff, payload.avg_loan_amnt)
 
@@ -297,13 +346,19 @@ def simulate_profit_cutoff(payload: schemas.ProfitCutoffRequest) -> schemas.Prof
         schemas.ProfitCurvePoint(
             cutoff=round(row["cutoff"], 2),
             approval_rate=None if pd.isna(row["approval_rate"]) else round(row["approval_rate"], 4),
-            expected_annual_profit=round(float(row["expected_annual_profit"]) * payload.avg_loan_amnt, 2),
+            expected_annual_profit=(
+                None if pd.isna(row["expected_annual_profit"])
+                else round(float(row["expected_annual_profit"]) * payload.avg_loan_amnt, 2)
+            ),
         )
         for row in base_curve.to_dict("records")
     ]
     delta_approval_pp = None
     if current["approval_rate"] is not None and optimal["approval_rate"] is not None:
         delta_approval_pp = round((optimal["approval_rate"] - current["approval_rate"]) * 100, 2)
+    delta_profit_krw = None
+    if current["expected_annual_profit"] is not None and optimal["expected_annual_profit"] is not None:
+        delta_profit_krw = round(optimal["expected_annual_profit"] - current["expected_annual_profit"], 2)
 
     logger.info("profit cutoff simulation: model_version=%s current=%.1f optimal=%.1f",
                 STORE.model_version(payload.model), current_snapped, optimal_cutoff)
@@ -313,8 +368,8 @@ def simulate_profit_cutoff(payload: schemas.ProfitCutoffRequest) -> schemas.Prof
         current=schemas.ProfitPoint(**current),
         optimal=schemas.ProfitPoint(**optimal),
         delta=schemas.ProfitDelta(
-            approval_rate_pp=delta_approval_pp if delta_approval_pp is not None else 0.0,
-            annual_profit_krw=round(optimal["expected_annual_profit"] - current["expected_annual_profit"], 2),
+            approval_rate_pp=delta_approval_pp,
+            annual_profit_krw=delta_profit_krw,
         ),
         curve=curve,
         assumptions=[

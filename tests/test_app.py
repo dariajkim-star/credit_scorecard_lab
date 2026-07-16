@@ -335,3 +335,24 @@ def test_profit_cutoff_scales_linearly_with_avg_loan_amnt(client):
 def test_profit_cutoff_rejects_nonpositive_avg_loan_amnt(client):
     r = client.post("/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 0})
     assert r.status_code == 422
+
+
+def test_profit_cutoff_rejects_avg_loan_amnt_above_upper_bound(client):
+    """le=10_000_000 upper bound (code review finding: unbounded avg_loan_amnt
+    scales linearly into an arbitrarily large/invalid management-report
+    number with no guard)."""
+    r = client.post(
+        "/v1/simulate/profit-cutoff", json={"model": "champion", "avg_loan_amnt": 10_000_001}
+    )
+    assert r.status_code == 422
+
+
+def test_profit_cutoff_rejects_non_finite_avg_loan_amnt(client):
+    # stdlib json.dumps (used by json=...) rejects inf outright, so send raw
+    # bytes to reach pydantic's own allow_inf_nan=False validation instead.
+    r = client.post(
+        "/v1/simulate/profit-cutoff",
+        content=b'{"model": "champion", "avg_loan_amnt": Infinity}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert r.status_code == 422

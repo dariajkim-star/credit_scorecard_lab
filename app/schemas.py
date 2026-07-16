@@ -103,23 +103,37 @@ class CutoffSimResponse(BaseModel):
 
 class ProfitCutoffRequest(BaseModel):
     model: ModelChoiceSingle = "champion"
-    avg_loan_amnt: float = Field(..., gt=0)
+    # Upper bound + finiteness: unbounded (or inf/nan) avg_loan_amnt would
+    # scale linearly into an arbitrarily large/invalid expected_annual_profit
+    # with no guard - a "management report" number should not be able to
+    # silently become nonsensical this way (code review finding). $10M/loan
+    # is a generous ceiling relative to the real dataset's max ($35,000).
+    avg_loan_amnt: float = Field(..., gt=0, le=10_000_000, allow_inf_nan=False)
 
 
 class ProfitPoint(BaseModel):
+    # expected_annual_profit is nullable: a cutoff with zero approvals (e.g.
+    # a hardcoded current_cutoff drifting outside a model's score range) has
+    # genuinely undefined economics, surfaced as null rather than a
+    # misleading 0.0 or NaN-that-breaks-JSON (code review finding, mirrors
+    # profit_cutoff_curve's NaN-not-0.0 fix).
     approval_rate: float | None
-    expected_annual_profit: float
+    expected_annual_profit: float | None
 
 
 class ProfitDelta(BaseModel):
-    approval_rate_pp: float
-    annual_profit_krw: float
+    # Nullable for the same reason as ProfitPoint: if either side's
+    # approval_rate/expected_annual_profit is undefined (zero-approval
+    # cutoff), the delta must say so rather than reporting a literal 0.0
+    # that reads as "no real change" (code review finding).
+    approval_rate_pp: float | None
+    annual_profit_krw: float | None
 
 
 class ProfitCurvePoint(BaseModel):
     cutoff: float
     approval_rate: float | None
-    expected_annual_profit: float
+    expected_annual_profit: float | None
 
 
 class ProfitCutoffResponse(BaseModel):

@@ -18,3 +18,7 @@
 - **점수 반올림(1자리 표시)과 등급 산출(원값 기준) 경계 부근 표시 불일치** [app/main.py:_score_one] — score=546.04는 546.0으로 표시되지만 등급은 546.04 원값으로 산출됨. 경계 부근(±0.05점)에서만 발생하는 코스메틱 이슈, 실사용 영향 낮음. 필요해지면 표시용 점수를 등급 산출 후 스냅하는 방식 검토.
 - **등급표에서 OOT 관측 0건인 등급이 monotonic 검증에서 조용히 제외** [app/loader.py:_grade_table, scorecard/grading.py:validate_monotonic] — `observed_bad_rate=None` 행이 dropna로 빠지면서 그 등급의 데이터 공백이 monotonic_validated=true에 반영 안 됨. `grading.py` 변경(빈 등급 명시 플래그)이 필요해 서빙 스토리 범위 밖.
 - **`/v1/score`가 `SingleScoreResponse`/`BothScoreResponse` 두 타입을 반환하는데 명시 response_model 없음** [app/main.py] — 쿼리파라미터(`model=both`)에 따라 셰이프가 달라지는 의도된 패턴이라 FastAPI의 단일 response_model로 표현 불가. OpenAPI 문서화 개선(oneOf 등)은 대시보드(2.5) 연동 시 필요성 재평가.
+
+## Deferred from: code review (story-2-4) (2026-07-16)
+
+- **degenerate profit curve 시 앱이 startup에서 크래시** [app/loader.py, scorecard/profit.py:find_optimal_cutoff] — 리뷰 patch로 `load_profit_frame`(조인 미매치·팬아웃)과 `find_optimal_cutoff`(전 cutoff 승인 0건)가 fail-fast ValueError를 던지게 되면서, startup 사전계산 경로에서 이 예외가 발생하면 uvicorn 자체가 뜨지 못함(503 MODEL_NOT_LOADED로 우아하게 강등되지 않음). 현재 실데이터에서는 발생 불가(100% 매치·정상 curve 실측)이고, "잘못된 아티팩트로는 서빙을 시작하지 않는다"는 관점에서 크래시가 오히려 안전한 기본값이라 수용. 부분 강등(profit 엔드포인트만 503, 나머지 서빙 유지)이 필요해지면 loader의 사전계산을 try/except로 감싸 `profit_base_curves`를 비우는 방식 검토 — 대시보드(2.5)가 가용성 요구를 명확히 할 때 재평가.

@@ -4,7 +4,7 @@ baseline_commit: 3b82d52
 
 # Story 2.4: 손익 기반 Cutoff (컨설턴트 킥①)
 
-Status: review
+Status: done
 
 ## Story
 
@@ -138,7 +138,23 @@ claude-fable-5 (bmad-dev-story, /loop 자율 진행)
 - `tests/test_app.py` (MODIFIED — profit-cutoff 엔드포인트 테스트 5건 추가)
 - `docs/implementation-artifacts/profit-cutoff-onepager-2-4.md` (NEW — 경영진 1페이저, 실데이터 수치+한계 명시)
 
+## Review Findings (2026-07-16, 반영 완료)
+
+3-레이어 코드리뷰(2.2/2.3 관례 계승)에서 나온 지적 중 patch로 반영한 항목:
+
+1. **zero-approval cutoff이 argmax를 조용히 이길 수 있었음** [scorecard/profit.py:profit_cutoff_curve] — 승인 0건 cutoff의 `expected_annual_profit`을 0.0으로 강제해서, 모든 실현 가능 cutoff의 기대손익이 음수인(적자 book) 상황이면 "아무도 승인 안 함"이 최적으로 보고될 수 있었음. NaN으로 변경(경제성 미정의를 명시), `find_optimal_cutoff`는 전부 NaN이면 fail-fast.
+2. **`realized_return_rate`의 0-가드가 실제 호출 경로에서 작동 안 함** [scorecard/profit.py] — `np.isscalar` 체크는 배열/Series 입력(실제 curve 계산 경로)에서 False라 zero loan_amnt가 inf로 관통. 배열까지 커버하는 가드로 교체.
+3. **raw parquet 조인의 many-to-many 팬아웃 무방비** [scorecard/profit.py:load_profit_frame] — raw `id` 중복 시 조인이 조용히 행을 불려 모든 비율을 왜곡. `validate="many_to_one"` 추가.
+4. **NaN 행이 curve 전체를 조용히 오염** [scorecard/profit.py:profit_cutoff_curve] — 필수 컬럼(score/loan_amnt/total_pymnt/recoveries) NaN 사전검증 추가(fail-fast).
+5. **`avg_loan_amnt` 상한·유한성 미검증** [app/schemas.py] — `le=10_000_000, allow_inf_nan=False` 추가(실데이터 max $35k 대비 여유 상한).
+6. **응답 스키마가 null 경제성을 표현 못 함** [app/schemas.py] — `ProfitPoint`/`ProfitDelta`/`ProfitCurvePoint`의 profit·delta 필드를 nullable로(0.0으로 위장하지 않음).
+7. **CURRENT_CUTOFF가 모델 점수 범위 밖으로 드리프트해도 무경고** [app/main.py] — 최근접 스냅이 5점 이상 벗어나면 warning 로그.
+8. **inf 요청 시 422 응답 자체가 500으로 폭발** [app/main.py] — pydantic이 거부해도 FastAPI 기본 422 body가 원본 inf를 echo해 stdlib json 직렬화 실패. `RequestValidationError` 핸들러 추가(비유한 float를 문자열화).
+
+회귀 테스트 8건 추가(test_profit.py 6건 + test_app.py 2건). 전체 **175 passed**, 라이브 uvicorn 재실증 완료(정상 200 / inf·0·상한초과 422 / 챔피언·챌린저 양쪽 로그 확인).
+
 ## Change Log
 
 - 2026-07-16: Story 2.4 생성 — 핵심 데이터 갭(frame에 loan_amnt 없음) 실측 발견·해소 방안(raw parquet 조인, AD-3 비위반 판단) 결정 기록, 오픈퀘스천 2건(연간 볼륨 가정, current_cutoff 기준값) 스토리오너 결정 필요로 명시, 2.1/2.3 재사용 지도 작성.
+- 2026-07-16: 코드리뷰 patch 8건 반영(zero-approval argmax·배열 0-가드·조인 팬아웃·NaN 오염·avg_loan_amnt 상한/유한성·nullable 스키마·CURRENT_CUTOFF 드리프트 경고·422-inf 직렬화). 회귀 테스트 8건 추가, pytest 175 passed, 라이브 uvicorn 재실증. Status → done.
 - 2026-07-16: Story 2.4 구현 — scorecard/profit.py + /v1/simulate/profit-cutoff 엔드포인트. 실데이터 실행 결과 두 모델 모두 손익 최적 cutoff이 현재보다 훨씬 낮음을 발견(챔피언 494.4 vs 546.0, 챌린저 507.1 vs 547.6), 승인율 거의 100%가 손익 최적점. 1페이저 작성(한계 명시 포함). 라이브 uvicorn 실증(챔피언·챌린저 양쪽). pytest 167 passed(+16). Status → review.

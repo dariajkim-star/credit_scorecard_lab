@@ -58,6 +58,16 @@ def test_realized_return_rate_guards_against_zero_loan_amnt():
         realized_return_rate(loan_amnt=0, total_pymnt=100, recoveries=0)
 
 
+def test_realized_return_rate_guards_against_zero_in_a_vectorized_call():
+    """The guard must fire for the array/Series call path too - this is the
+    ONLY call path profit_cutoff_curve actually uses (code review finding:
+    the original np.isscalar check silently passed a zero hidden inside an
+    array, producing inf via plain float division with no exception)."""
+    loan_amnt = np.array([10000.0, 0.0, 5000.0])
+    with pytest.raises(ValueError, match="loan_amnt"):
+        realized_return_rate(loan_amnt, np.array([11000.0, 100.0, 5500.0]), np.array([0.0, 0.0, 0.0]))
+
+
 # --- profit_cutoff_curve / find_optimal_cutoff (synthetic) ---------------
 
 
@@ -105,6 +115,61 @@ def test_profit_curve_not_forced_monotonic():
     assert curve["expected_annual_profit"].notna().any()
 
 
+def test_zero_approval_cutoff_is_nan_not_zero():
+    """A cutoff above every observed score approves nobody - its
+    expected_annual_profit must be NaN (undefined), not 0.0, so it can never
+    win find_optimal_cutoff's argmax over a genuinely lossy population
+    (code review finding: 0.0 could silently beat an all-negative curve and
+    get reported as the profit-optimal policy)."""
+    frame = _synthetic_profit_frame()
+    max_score = frame["score"].max()
+    curve = profit_cutoff_curve(
+        frame, "champion", avg_loan_amnt=12000.0, cutoffs=np.array([max_score + 1000.0])
+    )
+    assert curve.loc[0, "approved_count"] == 0
+    assert np.isnan(curve.loc[0, "expected_annual_profit"])
+    assert curve.loc[0, "approval_rate"] == pytest.approx(0.0)
+
+
+def test_find_optimal_cutoff_raises_when_every_cutoff_has_zero_approvals():
+    frame = _synthetic_profit_frame()
+    max_score = frame["score"].max()
+    curve = profit_cutoff_curve(
+        frame, "champion", avg_loan_amnt=12000.0,
+        cutoffs=np.array([max_score + 1000.0, max_score + 2000.0]),
+    )
+    with pytest.raises(ValueError, match="zero approved"):
+        find_optimal_cutoff(curve)
+
+
+def test_find_optimal_cutoff_delta_matches_independent_recomputation():
+    """Recomputes the max profit and its cutoff independently (via a plain
+    python loop, not the same pandas idxmax expression the code uses) so a
+    sign or aggregation error in find_optimal_cutoff would actually be
+    caught, unlike a test that re-derives the identical expression."""
+    frame = _synthetic_profit_frame()
+    curve = profit_cutoff_curve(frame, "champion", avg_loan_amnt=12000.0)
+    rows = curve.to_dict("records")
+    best = None
+    for row in rows:
+        if row["expected_annual_profit"] != row["expected_annual_profit"]:  # NaN check without numpy
+            continue
+        if best is None or row["expected_annual_profit"] > best["expected_annual_profit"]:
+            best = row
+    assert find_optimal_cutoff(curve) == pytest.approx(best["cutoff"])
+
+
+def test_population_with_nan_values_raises_fail_fast():
+    """A NaN in score/loan_amnt/total_pymnt/recoveries would otherwise
+    silently poison every cutoff whose approved set includes that row via
+    numpy's non-NaN-skipping .mean() (code review finding) - must fail
+    fast instead, mirroring strategy.py's population-completeness guard."""
+    frame = _synthetic_profit_frame()
+    frame.loc[frame.index[0], "total_pymnt"] = np.nan
+    with pytest.raises(ValueError, match="missing values"):
+        profit_cutoff_curve(frame, "champion", avg_loan_amnt=12000.0)
+
+
 # --- real data: loan_amnt join (AD-3-compliant augmentation) -------------
 
 
@@ -118,6 +183,22 @@ def test_load_profit_frame_joins_loan_amnt_from_raw_parquet():
     for col in ("score", "pd", "grade", "bad_flag"):
         assert col in profit_frame.columns
     assert profit_frame["loan_amnt"].notna().all()  # 100% match verified in story Dev Notes
+
+
+def test_load_profit_frame_raises_on_duplicate_raw_id(tmp_path):
+    """validate="many_to_one" must fire if the raw parquet ever has a
+    duplicate id - otherwise the join silently fans out (many-to-many),
+    inflating the population and skewing every rate with no error
+    (code review finding)."""
+    frame = pd.DataFrame({
+        "applicant_id": ["A1", "A2"],
+        "score": [500.0, 600.0],
+    })
+    raw = pd.DataFrame({"id": ["A1", "A1", "A2"], "loan_amnt": [10000.0, 10000.0, 5000.0]})
+    raw_path = tmp_path / "raw.parquet"
+    raw.to_parquet(raw_path)
+    with pytest.raises(Exception):  # pandas raises MergeError (ValueError subclass)
+        load_profit_frame(frame, raw_path)
 
 
 @pytest.mark.skipif(not ARTIFACTS_PRESENT, reason="scored frame / raw parquet not generated locally")
