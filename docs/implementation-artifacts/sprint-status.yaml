@@ -81,7 +81,7 @@ development_status:
   epic-2-retrospective: optional
   epic-3: in-progress  # 2026-07-16: 3-1 착수
   3-1-rule-efficiency-audit: done  # 2026-07-16: 3-레이어 리뷰 patch 6건 반영(no-rows/None 방어·id-키 조인·nan배 가드·§8 정합), 203 passed, 라이브 재실증
-  3-2-text-features-emp-title: backlog
+  3-2-text-features-emp-title: ready-for-dev  # 2026-07-16: 스토리 생성 — emp_title 롱테일(고유 20.7만) 상위K 매핑·binning 재사용·엔드포인트 없는 순수 분석·네거티브 결과도 산출물
   3-3-sas-replication: backlog
   3-4-mdd-readme-github: backlog
   epic-3-retrospective: optional
