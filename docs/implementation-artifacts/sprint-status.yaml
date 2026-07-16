@@ -79,8 +79,8 @@ development_status:
   2-4-profit-based-cutoff: done  # 2026-07-16: 리뷰 patch 8건 반영(zero-approval argmax·조인 팬아웃·nullable 스키마·422-inf 등), 175 passed, 라이브 재실증
   2-5-streamlit-dashboard: done  # 2026-07-16: 3-레이어 리뷰 patch 8건 반영(비JSON 매핑·null 방어·color domain 고정 등), 189 passed, 라이브 재검증
   epic-2-retrospective: optional
-  epic-3: backlog
-  3-1-rule-efficiency-audit: backlog
+  epic-3: in-progress  # 2026-07-16: 3-1 착수
+  3-1-rule-efficiency-audit: ready-for-dev  # 2026-07-16: 스토리 생성 — 룰 입력 raw 조인 갭(2.4 동형)·가상 룰셋·verdict 규칙 명시
   3-2-text-features-emp-title: backlog
   3-3-sas-replication: backlog
   3-4-mdd-readme-github: backlog
