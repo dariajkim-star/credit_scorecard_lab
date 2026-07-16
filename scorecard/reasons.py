@@ -76,17 +76,31 @@ def _normalize_raw_applicant(applicant_row: pd.Series, variables: list[str]) -> 
     return row
 
 
-def _safest_woe(binner) -> float:
+def _safest_woe(binner, coef: float, variable: str) -> float:
     """WoE of the safest real bin (excludes Special/Missing/Totals rows).
+
+    "Safest" is the bin that minimizes this variable's contribution to
+    logit_bad, i.e. minimizes coef * woe - which is max(WoE) when coef < 0
+    (the only case in the current champion, verified in Story 1.5) and
+    min(WoE) when coef > 0. Deciding by coef sign instead of hardcoding
+    max() removes the silent-failure mode where a flipped WOE polarity or a
+    retrained model with a positive coefficient would make every
+    points_lost clip to zero undetected (code review finding).
 
     Verified empirically against a real fitted binner (Story 2.2 context):
     binning_table.build() columns include "Bin" (row labels, with
     "Special"/"Missing" among them) and "WoE" (exact casing), plus a
-    "Totals" index row - all three must be excluded before taking max().
+    "Totals" index row - all three must be excluded before taking max/min.
     """
     table = binner.binning_table.build()
     real_bins = table[~table["Bin"].isin(["Special", "Missing"]) & (table.index != "Totals")]
-    return float(real_bins["WoE"].max())
+    if real_bins.empty:
+        raise ValueError(
+            f"binner for {variable!r} has no real bins (only Special/Missing) - "
+            "cannot determine a safest-bin baseline; check the fitted binning artifact"
+        )
+    woes = real_bins["WoE"].astype(float)
+    return float(woes.max() if coef < 0 else woes.min())
 
 
 def champion_reason_codes(
@@ -110,18 +124,40 @@ def champion_reason_codes(
     version with the subtraction order flipped, which silently zeroed out
     every applicant's points_lost (see reason-codes-report-2-2.md).
     """
+    if top_n < 1:
+        raise ValueError(f"top_n must be >= 1, got {top_n}")
     model = champion_bundle["model"]
     binners = champion_bundle["binners"]
+
+    coef_arr = model.coef_.ravel()
+    # zip() would silently truncate on a length mismatch, misattributing
+    # coefficients to the wrong variables (code review finding). fit_champion
+    # fits on a numpy array, so the sklearn model carries no feature names -
+    # the binners dict is the alignment source of truth instead: both
+    # fit_champion and save_champion_artifact built it from the same
+    # fit-time variables list, so its key order IS the coef_ order.
+    fit_order = list(binners.keys())
+    if list(variables) != fit_order:
+        raise ValueError(
+            f"variables {list(variables)} does not match the champion bundle's "
+            f"fit-time feature order {fit_order} - coefficient attribution "
+            "would be misaligned"
+        )
+    if len(coef_arr) != len(variables):
+        raise ValueError(
+            f"variables has {len(variables)} entries but the model has "
+            f"{len(coef_arr)} coefficients - cannot align"
+        )
 
     applicant_df = _normalize_raw_applicant(applicant_row, variables)
     woe_row = transform_woe(applicant_df, {v: binners[v] for v in variables}).iloc[0]
 
     factor = PDO / np.log(2)
-    coefs = dict(zip(variables, model.coef_.ravel()))
+    coefs = dict(zip(variables, coef_arr))
 
     losses: dict[str, float] = {}
     for var in variables:
-        safest_woe = _safest_woe(binners[var])
+        safest_woe = _safest_woe(binners[var], coefs[var], var)
         applicant_woe = float(woe_row[var])
         points_lost = factor * coefs[var] * (applicant_woe - safest_woe)
         # max(..., 0.0) can still yield IEEE754 negative zero (e.g. a
@@ -179,6 +215,8 @@ def challenger_reason_codes(
     """
     import shap
 
+    if top_n < 1:
+        raise ValueError(f"top_n must be >= 1, got {top_n}")
     model = challenger_bundle["model"]
     row = _prepare_challenger_row(applicant_row, variables)
 
@@ -187,6 +225,17 @@ def challenger_reason_codes(
     if isinstance(sv, list):
         sv = sv[-1]
     sv = np.asarray(sv)[0]
+    # Guard the assumed output shape: one scalar per feature. A 3D
+    # (n, features, classes) return from a future shap/LightGBM combination
+    # would otherwise zip arrays (not scalars) to variables and fail later
+    # with an opaque TypeError - or worse, silently squeeze to the wrong
+    # class (code review finding).
+    if sv.ndim != 1 or len(sv) != len(variables):
+        raise ValueError(
+            f"unexpected SHAP output shape {sv.shape} for {len(variables)} "
+            "variables - expected one scalar per variable; check the shap/"
+            "LightGBM version combination against the Story 2.2 spike notes"
+        )
 
     shap_by_var = dict(zip(variables, sv))
     ranked = sorted(shap_by_var.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
@@ -195,7 +244,9 @@ def challenger_reason_codes(
         ChallengerReasonCode(
             rank=i + 1,
             variable=var,
-            shap_value=round(float(value), 4),
+            # + 0.0 normalizes IEEE754 negative zero so a near-zero negative
+            # contribution never renders as "-0.0" (same guard as champion).
+            shap_value=round(float(value), 4) + 0.0,
             description=f"{_korean_label(var)}이(가) 부도 위험을 높이는 방향으로 작용했습니다.",
         )
         for i, (var, value) in enumerate(ranked)

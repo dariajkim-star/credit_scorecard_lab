@@ -239,6 +239,131 @@ def test_challenger_reason_codes_description_is_nonempty_korean_sentence(challen
         assert len(r.description) > 0
 
 
+# --- Guard rails added in code review (Story 2.2) ---------------------------
+
+
+def test_champion_reason_codes_rejects_nonpositive_top_n(champion_bundle, champion_applicant):
+    with pytest.raises(ValueError, match="top_n"):
+        champion_reason_codes(champion_bundle, champion_applicant, CHAMPION_VARS, top_n=0)
+    with pytest.raises(ValueError, match="top_n"):
+        champion_reason_codes(champion_bundle, champion_applicant, CHAMPION_VARS, top_n=-1)
+
+
+def test_challenger_reason_codes_rejects_nonpositive_top_n(challenger_bundle, challenger_applicant):
+    with pytest.raises(ValueError, match="top_n"):
+        challenger_reason_codes(challenger_bundle, challenger_applicant, CHALLENGER_VARS, top_n=0)
+
+
+def test_champion_reason_codes_rejects_misordered_variables(champion_bundle, champion_applicant):
+    """zip() silently truncating/misaligning variables against model.coef_
+    would attribute the wrong coefficient to the wrong variable - the guard
+    must reject any variables list that differs from the fit-time order."""
+    reordered = list(reversed(CHAMPION_VARS))
+    with pytest.raises(ValueError, match="feature order"):
+        champion_reason_codes(champion_bundle, champion_applicant, reordered)
+
+
+def test_safest_woe_raises_on_binner_with_no_real_bins():
+    """A degenerate binner whose table only has Special/Missing/Totals rows
+    must fail fast instead of returning NaN and poisoning every downstream
+    points_lost with NaN (which pydantic would silently accept)."""
+    from scorecard.reasons import _safest_woe
+
+    class _FakeTable:
+        def build(self):
+            return pd.DataFrame(
+                {"Bin": ["Special", "Missing"], "WoE": [0.0, 0.1]},
+                index=["Special", "Missing"],
+            )
+
+    class _FakeBinner:
+        binning_table = _FakeTable()
+
+    with pytest.raises(ValueError, match="no real bins"):
+        _safest_woe(_FakeBinner(), coef=-0.5, variable="degenerate_var")
+
+
+def test_safest_woe_uses_coef_sign_to_pick_direction():
+    """safest = argmin(coef * woe): max(WoE) for negative coef, min(WoE) for
+    positive coef. Hardcoding max() would silently pick the WORST bin if a
+    model ever ships a positive coefficient, flooring points_lost to 0 for
+    that variable undetected."""
+    from scorecard.reasons import _safest_woe
+
+    class _FakeTable:
+        def build(self):
+            return pd.DataFrame(
+                {"Bin": ["(-inf, 1)", "[1, inf)", "Special"], "WoE": [-0.8, 0.6, 0.0]},
+                index=[0, 1, "Special"],
+            )
+
+    class _FakeBinner:
+        binning_table = _FakeTable()
+
+    assert _safest_woe(_FakeBinner(), coef=-0.5, variable="v") == 0.6
+    assert _safest_woe(_FakeBinner(), coef=0.5, variable="v") == -0.8
+
+
+def test_challenger_shap_value_never_negative_zero(challenger_bundle, challenger_applicant):
+    """round() can produce IEEE754 -0.0 for a tiny negative contribution;
+    the +0.0 normalization must keep the exposed field rendering as 0.0."""
+    result = challenger_reason_codes(challenger_bundle, challenger_applicant, CHALLENGER_VARS)
+    for r in result:
+        if r.shap_value == 0.0:
+            assert str(r.shap_value) == "0.0"  # not "-0.0"
+
+
+def test_reason_codes_handle_missing_numeric_value(champion_bundle, challenger_bundle):
+    """A NaN in a numeric applicant field is a plausible real input: the
+    champion path maps it to the fitted Missing-bin WOE
+    (metric_missing="empirical"), the challenger path relies on LightGBM's
+    native NaN routing - both must return top-n codes without raising."""
+    champ_applicant = pd.Series({"fico_range_low": 650.0, "dti": np.nan})
+    champ = champion_reason_codes(champion_bundle, champ_applicant, CHAMPION_VARS, top_n=2)
+    assert len(champ) == 2
+    assert all(np.isfinite(r.points_lost) for r in champ)
+
+    chall_applicant = pd.Series(
+        {"fico_range_low": 600.0, "dti": np.nan, "home_ownership": "RENT"}
+    )
+    chall = challenger_reason_codes(challenger_bundle, chall_applicant, CHALLENGER_VARS)
+    assert len(chall) == 3
+    assert all(np.isfinite(r.shap_value) for r in chall)
+
+
+def test_champion_reason_codes_parses_percent_string_revol_util():
+    """Directly exercises the revol_util percent-string path with a
+    synthetic binner set that INCLUDES revol_util - the earlier
+    'handles_string_revol_util' test only proved the branch doesn't break
+    other variables (code review High finding: the parsing path itself had
+    zero always-on coverage; the real-data e2e test covers it but is
+    skipped when the parquet is absent)."""
+    rng = np.random.default_rng(7)
+    n = 2000
+    fico = pd.array(rng.uniform(300, 850, n), dtype="Float64")
+    revol = pd.array(rng.uniform(0, 100, n), dtype="Float64")
+    logit = -0.02 * (fico.to_numpy(dtype=float) - 575) + 0.03 * (revol.to_numpy(dtype=float) - 50)
+    y = pd.Series((rng.random(n) < 1 / (1 + np.exp(-logit))).astype(int), dtype="Int64")
+    train_df = pd.DataFrame({"fico_range_low": fico, "revol_util": revol})
+    variables = ["fico_range_low", "revol_util"]
+
+    binners = fit_binning(train_df, y, variables)
+    woe_df = transform_woe(train_df, binners)
+    model = fit_champion(woe_df, y, variables)
+    bundle = {"model": model, "binners": binners}
+
+    # raw applicant with revol_util as a bare percent STRING, as in the
+    # real accepted parquet ("29.7", no % sign)
+    applicant = pd.Series({"fico_range_low": 640.0, "revol_util": "83.5"})
+    result = champion_reason_codes(bundle, applicant, variables, top_n=2)
+
+    assert len(result) == 2
+    assert all(np.isfinite(r.points_lost) for r in result)
+    # a high-utilization applicant should lose points on revol_util
+    by_var = {r.variable: r for r in result}
+    assert by_var["revol_util"].points_lost > 0
+
+
 # --- Real data regression (real artifacts, real raw applicant row) ---------
 
 

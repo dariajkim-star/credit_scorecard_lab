@@ -74,7 +74,7 @@ development_status:
   epic-1-retrospective: optional
   epic-2: in-progress
   2-1-cutoff-simulation-swapset: done
-  2-2-reason-codes: review
+  2-2-reason-codes: done  # 2026-07-16: 3-레이어 리뷰 patch 7건 반영(부호 일반화·정렬 검증·가드), 128 passed
   2-3-fastapi-scoring-serving: backlog
   2-4-profit-based-cutoff: backlog
   2-5-streamlit-dashboard: backlog
