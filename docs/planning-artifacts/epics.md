@@ -28,7 +28,7 @@ FR7 (CAP-7): 점수를 1~10등급으로 매핑하고 단조성을 검증한다. 
 FR8 (CAP-8): train 대비 OOT의 변수·점수 분포 PSI를 산출한다. 성공기준: 점수 PSI < 0.1.
 FR9 (CAP-9): cutoff에 따른 승인율-부도율 트레이드오프 곡선을 산출한다. 성공기준: 전 구간 curve + 특정 cutoff 즉시 조회.
 FR10 (CAP-10): 챔피언→챌린저 교체시 판정이 바뀌는 swap-set을 정량화한다. 성공기준: swap-in/out 건수 + 부도율 비교표.
-FR11 (CAP-11): 개별 신청 건의 사유 top3를 모형 유형별(점수손실/SHAP)로 산출한다. 성공기준: 완성된 한국어 문장 3개 반환.
+FR11 (CAP-11): 개별 신청 건의 사유 top3를 모형 유형별(점수손실/SHAP)로 산출한다. 성공기준: 완성된 한국어 문장 최대 3개 반환. *(개정 2026-07-16, Story 2.2 리뷰: 실제 불리 요인만 사유로 인정 — 안전한 신청 건은 3개 미만(0건 포함)이 정상. SPEC CAP-11·API_SPEC v0.3 동일 개정.)*
 FR12 (CAP-12): FastAPI로 점수·PD·등급·reason code·cutoff 시뮬레이션을 서빙한다(판정은 하지 않음). 성공기준: API_SPEC.md 전 엔드포인트 pytest 통과 + `/v1/score` p95<300ms.
 FR13 (CAP-13): Streamlit으로 성능·등급분포·PSI·cutoff를 시각화한다. 성공기준: 4개 화면 라이브 구동.
 FR14 (CAP-14, 킥①): int_rate/recoveries로 손익 기반 cutoff을 산출한다. 성공기준: 현재 대비 최적 cutoff의 승인율·연간기대손익 delta가 assumptions와 함께 산출.

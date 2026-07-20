@@ -109,6 +109,60 @@ non-categorical-split retrain - out of this story's scope.
 worse" direction as `points_lost`), so both lists sort consistently
 descending by "how much this hurt the applicant."
 
+## Code review fix: non-adverse factors no longer returned
+
+An external review (GPT) caught a real bug reproducible on the SAFE
+applicant above: both `champion_reason_codes` and `challenger_reason_codes`
+originally returned exactly `top_n` entries regardless of sign. For an
+applicant already sitting in the safest bin for every variable, champion
+returned 3 entries reading `"...점수가 0.0점 하락했습니다"` (technically not
+wrong, but a non-reason presented as a reason), and — more seriously —
+challenger returned its 3 *least negative* (still risk-**reducing**) SHAP
+values, each rendered with the fixed description `"...부도 위험을 높이는
+방향으로 작용했습니다"` (raised risk), which is backwards: a negative SHAP
+value lowered risk. Confirmed on the real SAFE applicant
+(`applicant_id=68587465`) before the fix - it showed `revol_util`, `purpose`,
+`dti` all with negative `shap_value` labeled as risk-increasing.
+
+**Fix**: both functions now filter to `value > 1e-8` (points_lost /
+shap_value) before ranking, and return **fewer than `top_n`** — including
+an empty list — when fewer than `top_n` variables are genuinely adverse.
+Re-running the SAFE applicant after the fix:
+
+- Champion: 0 entries (`"실제로 불리한 변수 없음 — 전 변수가 이미 가장 안전한 bin"`)
+- Challenger: 0 entries (`"실제로 위험을 높인 변수 없음 — 전 변수가 위험 감소 방향으로 기여"`)
+
+The RISKY applicant (`applicant_id=67818493`) is unaffected by the fix — all
+3 of its top-3 factors were already genuinely adverse in both models, so it
+still returns exactly 3 for both.
+
+Tests updated/added to lock this in:
+`test_champion_reason_codes_best_applicant_has_near_zero_points_lost` now
+asserts the best applicant's result is `[]` (not just "less than worst"),
+`test_challenger_reason_codes_returns_fewer_than_top_n_when_not_all_adverse`
+asserts an applicant with zero adverse factors gets `[]`, and
+`test_challenger_reason_codes_returns_only_adverse_factors_sorted_descending`
+asserts every returned `shap_value` is strictly positive.
+
+Two related findings from the same review were evaluated and **not**
+changed in this story:
+- *manifest-driven `feature_order`/`pdo` instead of caller-supplied
+  `variables`*: the actual risk (silent coefficient/variable
+  misattribution on a caller-supplied mismatched list) is already closed by
+  the fit-order equality check added in `champion_reason_codes` (raises
+  `ValueError` on any mismatch, covered by
+  `test_champion_reason_codes_rejects_misordered_variables`). Switching to
+  loading `variables`/`pdo` from the manifest inside `reasons.py` would
+  change the function signature and break the "caller passes an
+  already-loaded bundle" convention shared with
+  `evaluation.py:champion_p_bad`/`challenger_p_bad` - deferred, not a
+  correctness gap as implemented.
+- *caching the SHAP explainer / binning tables across requests*: legitimate
+  for a serving layer, but `scorecard/reasons.py` is a pure per-applicant
+  analysis module (this story's scope, per AD-6/FR11) - "load once at
+  process start" is `app/loader.py`'s responsibility (Story 2.3, AD-4).
+  Left for that story.
+
 ## Data availability
 
 Real parquet + Story 1.5/1.6 artifacts exist in this dev environment.
